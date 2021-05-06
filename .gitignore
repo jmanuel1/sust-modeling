@@ -1,0 +1,9 @@
+
+# Created by https://www.toptal.com/developers/gitignore/api/idris
+# Edit at https://www.toptal.com/developers/gitignore?templates=idris
+
+### Idris ###
+*.ibc
+*.o
+
+# End of https://www.toptal.com/developers/gitignore/api/idris
