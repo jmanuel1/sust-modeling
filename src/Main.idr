@@ -1,47 +1,57 @@
 module Main
 
+import Data.Fin
+
 import Probability.Core
 import Probability.Monad
-import Probability.Display
 
-plusAssoc : (l, c, r : Nat) -> l `plus` (c `plus` r) = (l `plus` c) `plus` r
-plusAssoc Z c r = Refl
-plusAssoc (S l) c r = rewrite plusAssoc l c r in Refl
+-- %default total
 
 mortalityRate : Double
 mortalityRate = 0.03
 
-binomial : (trials: Nat) -> Double -> Prob (successes: Nat ** LTE successes trials)
-binomial Z _ = pure (0 ** LTEZero)
-binomial (S trials') successProbability = do
-  success <- shape [False, True] [1.0 - successProbability, successProbability]
-  (otherSuccesses ** lte) <- binomial trials' successProbability
-  if success
-    then pure (S otherSuccesses ** LTESucc lte)
-    else pure (otherSuccesses ** lteSuccRight lte)
+choose : Nat -> Nat -> Nat
+choose _ Z = 1
+choose Z (S _) = 0
+choose n k = divNat (product [((n `minus` k) + 1)..n]) (product [1..k])
 
-kill : (population: Nat) -> Double -> Prob (population': Nat ** LTE population' population)
-kill n rate = binomial n rate
+-- chooseZero : (n: Nat) -> choose n 0 = 1
+-- chooseZero n = ?cz
+--
+-- chooseOne : (n: Nat) -> choose (S n) 1 = S n
+-- chooseOne n = ?co
+
+safeNatToFin : (n: Nat) -> Fin (S n)
+safeNatToFin Z = FZ
+safeNatToFin (S n) = FS $ safeNatToFin n
+
+binomial : Nat -> Double -> Prob Nat
+binomial trials successProbability = shape possibilities (binomialProbability <$> possibilities) where
+  binomialProbability k = cast (trials `choose` k) * (successProbability `pow` k) * ((1.0 - successProbability) `pow` (trials `minus` k))
+  possibilities : List Nat
+  possibilities = [0..trials]
+
+kill : (population: Nat) -> Double -> Prob Nat
+kill = binomial
 
 replace : Nat -> Nat -> Prob (Nat, Nat)
-replace n1 n2 = do
-  (n1' ** _) <- binomial (n1 + n2) ((cast n1) / (cast (n1 + n2)))
-  pure (n1', n1 + n2 - n1')
+replace n1 n2 = gather $ do
+  n1' <- binomial (n1 + n2) ((cast n1) / (cast (n1 + n2)))
+  pure (n1', (n1 + n2) `minus` n1')
 
 step : Nat -> Nat -> Prob (Nat, Nat)
-step n1 n2 = do
-  (dead1 ** _) <- kill n1 mortalityRate
-  (dead2 ** _) <- kill n2 mortalityRate
+step n1 n2 = gather $ do
+  dead1 <- kill n1 mortalityRate
+  dead2 <- kill n2 mortalityRate
   (new1, new2) <- replace dead1 dead2
-  pure (n1 - dead1 + new1, n2 - dead2 + new2)
+  pure ((n1 `minus` dead1) + new1, (n2 `minus` dead2) + new2)
 
 simulate : Nat -> Nat -> Nat -> Prob (Nat, Nat)
 simulate species1Initial species2Initial Z = pure (species1Initial, species2Initial)
-simulate species1Initial species2Initial (S k) = do
+simulate species1Initial species2Initial (S k) = gather $ do
   (n1, n2) <- step species1Initial species2Initial
-  simulate n1 n2 k
+  gather $ simulate n1 n2 k
 
 main : IO ()
 main = do
-  putStrLn "Hello there!"
-  putStrLn $ (show (runProb (gather $ simulate 5 5 1)))
+  printLn (runProb (simulate 1 1 20))
