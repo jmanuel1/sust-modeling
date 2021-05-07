@@ -35,16 +35,14 @@ kill : (population: Nat) -> Double -> Prob Nat
 kill = binomial
 
 replace : Nat -> Nat -> Prob (Nat, Nat)
-replace n1 n2 = gather $ do
-  n1' <- binomial (n1 + n2) ((cast n1) / (cast (n1 + n2)))
-  pure (n1', (n1 + n2) `minus` n1')
+replace n1 n2 = gather $ replace' <$> binomial (n1 + n2) ((cast n1) / (cast (n1 + n2))) where
+  replace' n1' = (n1', (n1 + n2) `minus` n1')
 
 step : Nat -> Nat -> Prob (Nat, Nat)
 step n1 n2 = gather $ do
   dead1 <- kill n1 mortalityRate
   dead2 <- kill n2 mortalityRate
-  (new1, new2) <- replace dead1 dead2
-  pure ((n1 `minus` dead1) + new1, (n2 `minus` dead2) + new2)
+  gather $ (\(new1,new2) => ((n1 `minus` dead1) + new1, (n2 `minus` dead2) + new2)) <$> replace dead1 dead2
 
 simulate : Nat -> Nat -> Nat -> Prob (Nat, Nat)
 simulate species1Initial species2Initial Z = pure (species1Initial, species2Initial)
@@ -54,4 +52,6 @@ simulate species1Initial species2Initial (S k) = gather $ do
 
 main : IO ()
 main = do
-  printLn (runProb (simulate 1 1 20))
+  dist <- pure (simulate 1 1 10)
+  putStrLn "dist"
+  printLn (runProb dist)
