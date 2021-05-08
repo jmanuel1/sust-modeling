@@ -2,18 +2,78 @@ module Main
 
 import Data.Fin
 
-import Probability.Core
-import Probability.Monad
+-- import Probability.Core
+-- import Probability.Monad
 
 -- %default total
+
+data Prob : Type -> Type where
+  Binomial : Nat -> Double -> Prob Nat
+  Certainly : a -> Prob a
+  Bind : (Prob a) -> (a -> Prob b) -> Prob b
+  CustomDist : List (a, Double) -> Prob a
+
+Show a => Show (Prob a) where
+  show (Binomial n p) = "Binomial " ++ (show n) ++ " " ++ (show p)
+  show (Certainly a) = "Certainly " ++ (show a)
+  show (Bind (Binomial n p) _) = "Bind (" ++ (show $ Binomial n p) ++ ") <function>"
+  show (Bind a _) = "Bind <dist> <function>"
+  show (CustomDist d) = "CustomDist " ++ (show d)
+
+total
+choose : Nat -> Nat -> Nat
+choose _ Z = 1
+choose Z (S _) = 0
+choose n (S k') = assert_total $ divNat (product [((n `minus` k'))..n]) (product [1..(S k')])
+
+total
+binomialPMF : Nat -> Double -> Nat -> Double
+binomialPMF n p k = cast (n `choose` k) * (p `pow` k) * ((1.0 - p) `pow` (n `minus` k))
+
+total
+runProb : Prob a -> List (a, Double)
+runProb (Binomial n p) = (\k => (k, binomialPMF n p k)) <$> [0..n]
+
+runProb (Certainly a) = [(a, 1.0)]
+runProb (Bind a f) = [ (y, q*w) | (x,w) <- runProb a, (y,q) <- runProb (f x) ]
+runProb (CustomDist d) = d
+
+Functor Prob where
+  map f (Certainly a) = Certainly $ f a
+  map f (Bind a g) = Bind a (\x => f <$> g x)
+  map f (CustomDist d) = CustomDist $ (\(x, p) => (f x, p)) <$> d
+  map f p = CustomDist $ (\(x, p) => (f x, p)) <$> runProb p
+
+Applicative Prob where
+  pure = Certainly
+  (Certainly f) <*> p = f <$> p
+  (Bind pa f) <*> p = Bind pa (\a => (f a) <*> p)
+  (CustomDist d) <*> p = CustomDist [ (f x, q*w) | (f,w) <- d, (x,q) <- runProb p ] -- copied from https://github.com/lambdacasserole/probability/blob/master/src/Probability/Core.idr
+
+Monad Prob where
+  (Certainly a) >>= f = f a
+  (Bind fa f) >>= g = fa >>= (\a => (f a) >>= g)
+  fa >>= f = Bind fa f
+
+gather : (Eq a) => Prob a -> Prob a
+gather (CustomDist d) = CustomDist (gatherer d) where
+  splitBy : (a -> Bool) -> List a -> (List a, List a)
+  splitBy _ [] = ([], [])
+  splitBy pred (x::xs) = let (s, t) = splitBy pred xs in
+    if pred x then (x::s, t) else (s, x::t)
+  gatherer : (Eq a, Eq p, Num p) => List (a,p) -> List (a,p) -- copied from https://github.com/lambdacasserole/probability/blob/master/src/Probability/Core.idr
+  gatherer [] = []
+  gatherer ((x,p) :: xs) = assert_total $  -- why is assert_total needed?
+     let lyln = splitBy (\(z,_) => z == x) xs
+         newp = (+) p . sum $ map snd (fst lyln)
+     in  (x,newp) :: gatherer (snd lyln)
+gather (Bind pa f) = pa >>= (\a => gather $ f a)
+gather p = p
 
 mortalityRate : Double
 mortalityRate = 0.03
 
-choose : Nat -> Nat -> Nat
-choose _ Z = 1
-choose Z (S _) = 0
-choose n k = divNat (product [((n `minus` k) + 1)..n]) (product [1..k])
+
 
 -- chooseZero : (n: Nat) -> choose n 0 = 1
 -- chooseZero n = ?cz
@@ -26,10 +86,7 @@ safeNatToFin Z = FZ
 safeNatToFin (S n) = FS $ safeNatToFin n
 
 binomial : Nat -> Double -> Prob Nat
-binomial trials successProbability = shape possibilities (binomialProbability <$> possibilities) where
-  binomialProbability k = cast (trials `choose` k) * (successProbability `pow` k) * ((1.0 - successProbability) `pow` (trials `minus` k))
-  possibilities : List Nat
-  possibilities = [0..trials]
+binomial = Binomial
 
 kill : (population: Nat) -> Double -> Prob Nat
 kill = binomial
@@ -52,6 +109,7 @@ simulate species1Initial species2Initial (S k) = gather $ do
 
 main : IO ()
 main = do
-  dist <- pure (simulate 1 1 10)
+  dist <- pure (simulate 1 1 5)
   putStrLn "dist"
+  printLn dist
   printLn (runProb dist)
