@@ -5,7 +5,7 @@ import Data.Fin
 -- import Probability.Core
 -- import Probability.Monad
 
--- %default total
+%default total
 
 data Prob : Type -> Type where
   Binomial : Nat -> Double -> Prob Nat
@@ -20,20 +20,49 @@ Show a => Show (Prob a) where
   show (Bind a _) = "Bind <dist> <function>"
   show (CustomDist d) = "CustomDist " ++ (show d)
 
+zeroSum : {a: Nat} -> {b: Nat} -> (a + b = 0) -> Either (a = 0) (b = 0)
+zeroSum {a = Z} _ = Left Refl
+zeroSum {b = Z} _ = Right Refl
+zeroSum _ = assert_unreachable
+
+zeroProduct : {a: Nat} -> {b: Nat} -> (a * b = 0) -> Either (a = 0) (b = 0)
+zeroProduct {a = Z} _ = Left Refl
+zeroProduct {b = Z} _ = Right Refl
+zeroProduct _ = assert_unreachable
+
+factNZ : (k: Nat) -> Not (fact k = Z)
+factNZ Z p = SIsNotZ p
+factNZ (S k) p = case zeroSum p of
+  Left q => factNZ k q
+  Right q => case zeroProduct q of
+    Left r => SIsNotZ $ replace {P = \k => plus (fact k) (mult k (fact k)) = 0} r p
+    Right r => factNZ k r
+
 total
 choose : Nat -> Nat -> Nat
 choose _ Z = 1
 choose Z (S _) = 0
-choose n (S k') = assert_total $ divNat (product [((n `minus` k'))..n]) (product [1..(S k')])
+choose n (S k') = divNatNZ (product [((n `minus` k'))..n]) (fact (S k')) (factNZ (S k'))
 
 total
 binomialPMF : Nat -> Double -> Nat -> Double
 binomialPMF n p k = cast (n `choose` k) * (p `pow` k) * ((1.0 - p) `pow` (n `minus` k))
 
+splitBy : (a -> Bool) -> List a -> (List a, List a)
+splitBy _ [] = ([], [])
+splitBy pred (x::xs) = let (s, t) = splitBy pred xs in
+  if pred x then (x::s, t) else (s, x::t)
+
+gatherer : (Eq a, Eq p, Num p) => List (a,p) -> List (a,p) -- copied from https://github.com/lambdacasserole/probability/blob/master/src/Probability/Core.idr
+gatherer [] = []
+gatherer ((x,p) :: xs) = assert_total $  -- why is assert_total needed?
+   let lyln = splitBy (\(z,_) => z == x) xs
+       newp = (+) p . sum $ map snd (fst lyln)
+   in  (x,newp) :: gatherer (snd lyln)
+
 total
 runProb : Prob a -> List (a, Double)
 runProb (Binomial n p) = (\k => (k, binomialPMF n p k)) <$> [0..n]
-
 runProb (Certainly a) = [(a, 1.0)]
 runProb (Bind a f) = [ (y, q*w) | (x,w) <- runProb a, (y,q) <- runProb (f x) ]
 runProb (CustomDist d) = d
@@ -56,18 +85,8 @@ Monad Prob where
   fa >>= f = Bind fa f
 
 gather : (Eq a) => Prob a -> Prob a
-gather (CustomDist d) = CustomDist (gatherer d) where
-  splitBy : (a -> Bool) -> List a -> (List a, List a)
-  splitBy _ [] = ([], [])
-  splitBy pred (x::xs) = let (s, t) = splitBy pred xs in
-    if pred x then (x::s, t) else (s, x::t)
-  gatherer : (Eq a, Eq p, Num p) => List (a,p) -> List (a,p) -- copied from https://github.com/lambdacasserole/probability/blob/master/src/Probability/Core.idr
-  gatherer [] = []
-  gatherer ((x,p) :: xs) = assert_total $  -- why is assert_total needed?
-     let lyln = splitBy (\(z,_) => z == x) xs
-         newp = (+) p . sum $ map snd (fst lyln)
-     in  (x,newp) :: gatherer (snd lyln)
-gather (Bind pa f) = pa >>= (\a => gather $ f a)
+gather (CustomDist d) = CustomDist (gatherer d)
+gather (Bind pa f) = pa >>= (\a => gather $ f a) -- FIXME: Might not gather completely because pa not gathered
 gather p = p
 
 mortalityRate : Double
@@ -109,7 +128,7 @@ simulate species1Initial species2Initial (S k) = gather $ do
 
 main : IO ()
 main = do
-  dist <- pure (simulate 1 1 5)
+  dist <- pure (simulate 1 1 3)
   putStrLn "dist"
   printLn dist
-  printLn (runProb dist)
+  printLn (gatherer $ runProb dist)
