@@ -20,29 +20,29 @@ Show a => Show (Prob a) where
   show (Bind a _) = "Bind <dist> <function>"
   show (CustomDist d) = "CustomDist " ++ (show d)
 
-zeroSum : {a: Nat} -> {b: Nat} -> (a + b = 0) -> Either (a = 0) (b = 0)
-zeroSum {a = Z} _ = Left Refl
-zeroSum {b = Z} _ = Right Refl
-zeroSum _ = assert_unreachable
+zeroSum : {a: Nat} -> {b: Nat} -> (a + b = 0) -> ((a = 0), (b = 0))
+zeroSum {a = Z} Refl = (Refl, Refl)
+zeroSum {a = a} {b = Z} prf = (replace {P = \x => x = 0} (plusZeroRightNeutral a) prf, Refl)
 
-zeroProduct : {a: Nat} -> {b: Nat} -> (a * b = 0) -> Either (a = 0) (b = 0)
-zeroProduct {a = Z} _ = Left Refl
-zeroProduct {b = Z} _ = Right Refl
-zeroProduct _ = assert_unreachable
-
-factNZ : (k: Nat) -> Not (fact k = Z)
-factNZ Z p = SIsNotZ p
-factNZ (S k) p = case zeroSum p of
-  Left q => factNZ k q
-  Right q => case zeroProduct q of
-    Left r => SIsNotZ $ replace {P = \k => plus (fact k) (mult k (fact k)) = 0} r p
-    Right r => factNZ k r
+factNZ : {k: Nat} -> Not (fact k = Z)
+factNZ {k = Z} p = SIsNotZ p
+factNZ {k = (S k)} p = let (q1, _) = zeroSum p in factNZ q1
 
 total
 choose : Nat -> Nat -> Nat
 choose _ Z = 1
 choose Z (S _) = 0
-choose n (S k') = divNatNZ (product [((n `minus` k'))..n]) (fact (S k')) (factNZ (S k'))
+-- if n < k then n `choose` k = 0
+choose n (S k') = divNatNZ (product [((n `minus` k'))..n]) (fact (S k')) factNZ
+
+-- chooseZero : {n: Nat} -> choose n Z = 1
+-- chooseZero {n} = ?cz_1
+-- chooseZero {n = (S k)} = ?cz_2
+--
+-- chooseOne : (n: Nat) -> choose (S n) 1 = S n
+-- chooseOne n = ?co
+
+-- chooseNLessK
 
 total
 binomialPMF : Nat -> Double -> Nat -> Double
@@ -91,18 +91,6 @@ gather p = p
 
 mortalityRate : Double
 mortalityRate = 0.03
-
-
-
--- chooseZero : (n: Nat) -> choose n 0 = 1
--- chooseZero n = ?cz
---
--- chooseOne : (n: Nat) -> choose (S n) 1 = S n
--- chooseOne n = ?co
-
-safeNatToFin : (n: Nat) -> Fin (S n)
-safeNatToFin Z = FZ
-safeNatToFin (S n) = FS $ safeNatToFin n
 
 binomial : Nat -> Double -> Prob Nat
 binomial = Binomial
