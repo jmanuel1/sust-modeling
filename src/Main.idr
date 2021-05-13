@@ -20,29 +20,38 @@ Show a => Show (Prob a) where
   show (Bind a _) = "Bind <dist> <function>"
   show (CustomDist d) = "CustomDist " ++ (show d)
 
-zeroSum : {a: Nat} -> {b: Nat} -> (a + b = 0) -> ((a = 0), (b = 0))
-zeroSum {a = Z} Refl = (Refl, Refl)
-zeroSum {a = a} {b = Z} prf = (replace {P = \x => x = 0} (plusZeroRightNeutral a) prf, Refl)
+-- NOTE: It seems Idris won't accept this as total unless I handle the
+-- 'impossible' case (that's also why choose wasn't reducing at compile time).
+zeroSum : {a: Nat} -> {b: Nat} -> (a + b = 0) -> Either Void ((a = 0), (b = 0))
+zeroSum {a = Z} Refl = Right (Refl, Refl)
+zeroSum {a} {b = Z} prf = Right (replace {P = \x => x = 0} (plusZeroRightNeutral a) prf, Refl)
+zeroSum {a = S a} {b = S b} prf = Left $ SIsNotZ prf
 
 factNZ : {k: Nat} -> Not (fact k = Z)
 factNZ {k = Z} p = SIsNotZ p
-factNZ {k = (S k)} p = let (q1, _) = zeroSum p in factNZ q1
+factNZ {k = (S k)} p = case zeroSum p of
+  Left v => v
+  Right (q1, _) => factNZ q1
+
+-- factBetween : Nat -> Nat -> Nat
+-- factBetween n m = if n == m then n else if n > m then 0 else  (factBetween n (pred m)) * (m)
 
 total
 choose : Nat -> Nat -> Nat
 choose _ Z = 1
+choose (S n) (S Z) = S n
 choose Z (S _) = 0
 -- if n < k then n `choose` k = 0
-choose n (S k') = divNatNZ (product [((n `minus` k'))..n]) (fact (S k')) factNZ
+choose n k = divNatNZ (divNatNZ (fact n) (fact (n `minus` k)) factNZ) (fact k) factNZ
 
--- chooseZero : {n: Nat} -> choose n Z = 1
--- chooseZero {n} = ?cz_1
--- chooseZero {n = (S k)} = ?cz_2
---
--- chooseOne : (n: Nat) -> choose (S n) 1 = S n
--- chooseOne n = ?co
+chooseZero : {n: Nat} -> choose n Z = 1
+chooseZero = Refl
 
--- chooseNLessK
+chooseOne : {n: Nat} -> choose (S n) 1 = S n
+chooseOne = Refl
+
+-- chooseNLessK : choose n (n + m + 1) = 0
+-- chooseNLessK = ?csdvsd
 
 total
 binomialPMF : Nat -> Double -> Nat -> Double
@@ -59,6 +68,7 @@ gatherer ((x,p) :: xs) = assert_total $  -- why is assert_total needed?
    let lyln = splitBy (\(z,_) => z == x) xs
        newp = (+) p . sum $ map snd (fst lyln)
    in  (x,newp) :: gatherer (snd lyln)
+
 
 total
 runProb : Prob a -> List (a, Double)
