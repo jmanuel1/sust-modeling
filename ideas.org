@@ -1,0 +1,33 @@
+* proving properties of distributions
+** support of (binomial n p) is [0..n]
+
+* having multiple interpretations of a monad
+** probability
+- calculate distribution exhaustively
+- calculate distribution by sampling (Monte Carlo method)
+- take a sample of a distribution
+
+* proving properties of a model
+** total population of all species constant in a very simple population model
+
+* tracking the 'error bars' in a calculation and being able to specify constraints on them
+
+* correct use of units
+
+* automatic differentiation
+
+* tracking data provenance at the type level
+
+---
+
+* maybe focus on exploratory models
+
+---
+
+* Sources of things to try
+- [[http://www.cs.cmu.edu/~zkolter/course/15-830-f12/]]
+- [[https://esajournals.onlinelibrary.wiley.com/doi/10.1890/0012-9623-93.4.373]] (I tried the 'forward simulations' example)
+- [[https://ourcodingclub.github.io/course]]
+
+* explanation-oriented programming
+- [[https://web.engr.oregonstate.edu/~erwig/papers/VisExplProbReasoning_VLHCC09.pdf]]

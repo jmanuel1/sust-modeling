@@ -1,0 +1,41 @@
+Let's say you want to put into code a very simple population model of two
+species as described
+[[https://esajournals.onlinelibrary.wiley.com/doi/10.1890/0012-9623-93.4.373][here]]
+under "Forward Simulations." (A simple model was chosen to avoid going down too
+many rabbit holes.) Since this a probabilistic model, you'll want to use
+probabilistic programming. In functional programming languages, there are many,
+many ways to represent probability as a monad so that you form an embedded
+probabilistic programming DSL. Depending on how that code is written, you could
+easily switch between different implementations or interpreters of the same
+monadic interface. That could be used to switch between e.g. exhaustively
+computing distributions and using sampling to approximate distributions. (One
+could use an effect system or 'free(r) monads' instead of just monads, I think.)
+
+Depending on the type system (for the sake of example, a dependent type system
+similar to that of Idris 1), you could also encode constraints on the model
+directly into types so that a program won't even compile if the code violates
+those constraints. For example, in the model described above, the sum of the
+populations of the two species is constant.
+
+For the implementers of probabilistic DSLs, the types could be used to enforce
+properties of probability distributions. Perhaps simpler probability
+distributions could be made to be correct by construction.
+
+* Uncertainty
+
+A type system could be used to keep track of different notions of uncertainty,
+like error propagation on a calculation. For error propagation, a connection can
+be made with probability (often measurement error is stated in terms of standard
+deviation).
+
+* Vulnerability
+
+In [[https://link.springer.com/chapter/10.1007%2F978-3-642-03034-5_12][Generic
+Libraries in C++ with Concepts from High-Level Domain Descriptions in Haskell
+(Lincke et al.)]], a generalized version of the concept of 'vulnerability' that
+applies to studies that project into the future via computational techniques is
+encoded in a high-level Haskell description. The description was converted to
+generic C++ where one is free to implement the various parts of the model any
+way they want (perhaps using high-performance computing libraries). Using these
+sorts of high-level descriptions to generate library code could be an
+interesting direction, though it's not what I had in mind.
