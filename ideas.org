@@ -18,6 +18,8 @@
 
 * tracking data provenance at the type level
 
+* monad composition: monad transformers
+
 ---
 
 * maybe focus on exploratory models
