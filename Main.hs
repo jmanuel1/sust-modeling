@@ -1,8 +1,13 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE ExplicitForAll #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Main where
+import Data.Type.Equality
+import Data.Void
 
 main :: IO ()
 main = do
@@ -62,6 +67,14 @@ minus a Z = a
 minus (S a) (S b) = minus a b
 minus Z b = Z
 
+type family Mult (a :: Nat) b :: Nat where
+  Mult _ Z = Z
+  Mult a (S b) = Plus a (Mult a b)
+
+type family Plus (a :: Nat) b :: Nat where
+  Plus a Z = Z
+  Plus a (S b) = S (Plus a b)
+
 data Prob :: * -> * where
   Binomial :: Nat -> Double -> Prob Nat
   Certainly :: a -> Prob a
@@ -94,23 +107,55 @@ instance Monad Prob where
   fa >>= f = Bind fa f
 
 -- total
-runProb :: Prob a -> (k: Nat ** Vect (S k) (a, Double))
-runProb (Binomial n p) = (_ ** (\k -> (k, binomialPMF n p k)) <$> 0 :: fromList [1...n])
-runProb (Certainly a) = (_ ** [(a, 1.0)])
+runProb :: Prob a -> (NonEmptyVect (a, Double))
+runProb (Binomial n p) = NonEmptyVect ((\k -> (k, binomialPMF n p k)) <$> 0 :> fromList [1..n])
+runProb (Certainly a) = [(a, 1.0)]
 -- runProb {a} (Bind probA f) = (_ ** (\((_,w),(y,q)) => (y, q*w)) <$> cartesianProduct {m = m} (DPair.snd {x = runProb probA}) f'') where
 --   f' : (a: Type) -> (b, Double) -> (l: Nat ** Vect (S l) (a, Double))
 --   f' a (y,_) = runProb {a = a} ?dxdv --(f x)
 --   f'' y' = DPair.snd {x = (f' a y')}
 --   m = S $ DPair.fst (f' (head (DPair.snd (runProb probA))))
-runProb {a} (Bind probA f) =
+runProb (Bind probA f) =
   concatNonempty (snd joinedPartly) -- unjoined = (\(pA,p) => (runProb pA, p)) <$> probfAs in
   where
-    probfAs :: (k: Nat ** Vect (S k) ((l: Nat ** Vect (S l) (a, Double)), Double))
-    probfAs = (_ ** (\(x,p) -> (runProb (f x), p)) <$> snd (runProb (assert_smaller (Bind probA f) probA)))
-    joinedPartly :: (k: Nat ** Vect (S k) (l: Nat ** Vect (S l) (a, Double)))
-    joinedPartly = (_ ** (\((_**dist),p) => (_ ** (\(x,q) => (x, p*q)) <$> dist)) <$> snd probfAs)
+    probfAs :: NonEmptyVect (NonEmptyVect (a, Double), Double)
+    probfAs = (\(x,p) -> (runProb (f x), p)) <$> snd (runProb (assert_smaller (Bind probA f) probA))
+    joinedPartly :: NonEmptyVect (NonEmptyVect (a, Double))
+    joinedPartly = (\((dist),p) -> (_ ** (\(x,q) -> (x, p*q)) <$> dist)) <$> snd probfAs
     -- joinedPartly = (_ ** ?cbfdbdb <$> probfAs)
-runProb (CustomDist d) = (_ ** d)
+runProb (CustomDist d) = d
+
+binomialPMF :: Nat -> Double -> Nat -> Double
+binomialPMF n p k = natToDouble (n `choose` k) * (p `pow` k) * ((1.0 - p) `pow` (n `minus` k))
+
+choose :: Nat -> Nat -> Nat
+choose _ Z = 1
+choose (S n) (S Z) = S n
+choose Z (S _) = 0
+-- if n < k then n `choose` k = 0
+choose n k = divNatNZ (divNatNZ (fact n) (fact (n `minus` k)) factNZ) (fact k) factNZ
+
+fact Z = S Z
+fact (S n) = (S n) * fact n
+
+type family Fact n :: Nat where
+  Fact Z = S Z
+  Fact (S n) = Mult (S n) (Fact n)
+
+-- FIXME: Don't ignore proof
+divNatNZ :: Nat -> Nat -> a -> Nat
+divNatNZ a b _ = (fromInteger ((natToInteger a) `div` (natToInteger b)))
+
+factNZ :: forall (k:: Nat). Not (Fact k :~: Z)
+factNZ Z p = SIsNotZ p
+factNZ (S k) p = case zeroSum p of
+  Left v -> v
+  Right (q1, _) -> factNZ q1
+
+type Not a = (->) a Void
+
+data NonEmptyVect :: * -> * where
+  NonEmptyVect :: Vect (S n) a -> NonEmptyVect a
 
 data Vect :: Nat -> * -> * where
   Nil :: Vect Z a
