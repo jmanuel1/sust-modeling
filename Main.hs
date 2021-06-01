@@ -1,7 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ExplicitForAll #-}
-{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -11,11 +10,11 @@ import Data.Void
 
 main :: IO ()
 main = do
-  dist <- pure (simulate 1 1 3)
+  let dist = simulate 1 1 3
   putStrLn "dist"
   print dist
   putStrLn ""
-  print (gatherer $ toList (snd (runProb dist)))
+  print (gatherer $ toList (case runProb dist of NonEmptyVect xs -> xs))
   putStrLn ""
 
 simulate :: Nat -> Nat -> Nat -> Prob (Nat, Nat)
@@ -43,7 +42,7 @@ binomial = Binomial
 mortalityRate :: Double
 mortalityRate = 0.03
 
-data Nat = S Nat | Z deriving (Eq)
+data Nat = Z | S Nat deriving (Eq, Ord)
 
 instance Show Nat where
   show n = show (natToInteger n)
@@ -57,6 +56,18 @@ instance Num Nat where
   fromInteger 0 = Z
   fromInteger n = S (fromInteger (n - 1))
   negate n = undefined -- FIXME
+
+instance Enum Nat where
+  toEnum 0 = Z
+  toEnum n = S (toEnum (n - 1))
+  fromEnum n = natToInteger n
+
+instance Real Nat where
+  toRational n = toRational (natToInteger n)
+
+instance Integral Nat where
+  quotRem a b = ((fromInteger ((natToInteger a) `div` (natToInteger b))), (fromInteger ((natToInteger a) `rem` (natToInteger b))))
+  toInteger = natToInteger
 
 natToInteger Z = 0
 natToInteger (S n) = 1 + natToInteger n
@@ -73,6 +84,7 @@ type family Mult (a :: Nat) b :: Nat where
 
 type family Plus (a :: Nat) b :: Nat where
   Plus a Z = Z
+  Plus Z a = a
   Plus a (S b) = S (Plus a b)
 
 data Prob :: * -> * where
@@ -92,7 +104,8 @@ instance Functor Prob where
   fmap f (Certainly a) = Certainly $ f a
   fmap f (Bind a g) = Bind a (\x -> f <$> g x)
   fmap f (CustomDist d) = CustomDist $ (\(x, p) -> (f x, p)) <$> d
-  fmap f p = CustomDist $ (\(x, p) -> (f x, p)) <$> (snd $ runProb p)
+  -- fmap f p = CustomDist $ (\(x, p) -> (f x, p)) <$> case (runProb p) of NonEmptyVect xs -> xs
+  fmap f p = Bind p (\x -> Certainly (f x))
 
 instance Applicative Prob where
   pure = Certainly
@@ -108,32 +121,35 @@ instance Monad Prob where
 
 -- total
 runProb :: Prob a -> (NonEmptyVect (a, Double))
-runProb (Binomial n p) = NonEmptyVect ((\k -> (k, binomialPMF n p k)) <$> 0 :> fromList [1..n])
-runProb (Certainly a) = [(a, 1.0)]
+runProb (Binomial n p) = case fromList [1..n] of
+  VectWithUnknownLength support -> NonEmptyVect ((\k -> (k, binomialPMF n p k)) <$> 0 :> support)
+runProb (Certainly a) = NonEmptyVect ((a, 1.0) :> Nil)
 -- runProb {a} (Bind probA f) = (_ ** (\((_,w),(y,q)) => (y, q*w)) <$> cartesianProduct {m = m} (DPair.snd {x = runProb probA}) f'') where
 --   f' : (a: Type) -> (b, Double) -> (l: Nat ** Vect (S l) (a, Double))
 --   f' a (y,_) = runProb {a = a} ?dxdv --(f x)
 --   f'' y' = DPair.snd {x = (f' a y')}
 --   m = S $ DPair.fst (f' (head (DPair.snd (runProb probA))))
 runProb (Bind probA f) =
-  concatNonempty (snd joinedPartly) -- unjoined = (\(pA,p) => (runProb pA, p)) <$> probfAs in
+  concatNonempty (case joinedPartly of NonEmptyVect xs -> xs) -- unjoined = (\(pA,p) => (runProb pA, p)) <$> probfAs in
   where
-    probfAs :: NonEmptyVect (NonEmptyVect (a, Double), Double)
-    probfAs = (\(x,p) -> (runProb (f x), p)) <$> snd (runProb (assert_smaller (Bind probA f) probA))
+
     joinedPartly :: NonEmptyVect (NonEmptyVect (a, Double))
-    joinedPartly = (\((dist),p) -> (_ ** (\(x,q) -> (x, p*q)) <$> dist)) <$> snd probfAs
+    joinedPartly = (\((dist),p) -> (_ ** (\(x,q) -> (x, p*q)) <$> dist)) <$> probfAs
     -- joinedPartly = (_ ** ?cbfdbdb <$> probfAs)
 runProb (CustomDist d) = d
 
+probfAs :: Prob b -> (b -> Prob a) -> NonEmptyVect (NonEmptyVect (a, Double), Double)
+probfAs probA f = NonEmptyVect ((\(x,p) -> (runProb (f x), p)) <$> case runProb (probA) of NonEmptyVect xs -> xs)
+
 binomialPMF :: Nat -> Double -> Nat -> Double
-binomialPMF n p k = natToDouble (n `choose` k) * (p `pow` k) * ((1.0 - p) `pow` (n `minus` k))
+binomialPMF n p k = natToDouble (n `choose` k) * (p ^^ k) * ((1.0 - p) ^^ (n `minus` k))
 
 choose :: Nat -> Nat -> Nat
 choose _ Z = 1
 choose (S n) (S Z) = S n
 choose Z (S _) = 0
 -- if n < k then n `choose` k = 0
-choose n k = divNatNZ (divNatNZ (fact n) (fact (n `minus` k)) factNZ) (fact k) factNZ
+choose n k = divNatNZ (divNatNZ (fact n) (fact (n `minus` k))) (fact k)
 
 fact Z = S Z
 fact (S n) = (S n) * fact n
@@ -142,24 +158,42 @@ type family Fact n :: Nat where
   Fact Z = S Z
   Fact (S n) = Mult (S n) (Fact n)
 
--- FIXME: Don't ignore proof
-divNatNZ :: Nat -> Nat -> a -> Nat
-divNatNZ a b _ = (fromInteger ((natToInteger a) `div` (natToInteger b)))
+divNatNZ :: Nat -> Nat -> Nat
+divNatNZ a b = (fromInteger ((natToInteger a) `div` (natToInteger b)))
 
-factNZ :: forall (k:: Nat). Not (Fact k :~: Z)
-factNZ Z p = SIsNotZ p
-factNZ (S k) p = case zeroSum p of
-  Left v -> v
-  Right (q1, _) -> factNZ q1
+concatNonempty' :: Vect n (VectWithUnknownLength a) -> (VectWithUnknownLength a)
+concatNonempty' Nil = VectWithUnknownLength Nil
+concatNonempty' (x1:>xs) = (x1) ++ ((concatNonempty' xs))
+
+concatNonempty :: Vect (S n) (NonEmptyVect a) -> (NonEmptyVect a)
+concatNonempty (x :> Nil) = x
+-- concatNonempty [x1, x2] = (_ ** (snd x1) ++ (snd x2))
+concatNonempty (x1:>xs) = (x1) ++ ((concatNonempty' xs))
 
 type Not a = (->) a Void
 
 data NonEmptyVect :: * -> * where
   NonEmptyVect :: Vect (S n) a -> NonEmptyVect a
 
+data VectWithUnknownLength :: * -> * where
+  VectWithUnknownLength :: Vect n a -> VectWithUnknownLength a
+
 data Vect :: Nat -> * -> * where
   Nil :: Vect Z a
   (:>) :: a -> Vect n a -> Vect (S n) a
+
+append :: Vect n a -> Vect m a -> Vect (Plus n m) a
+append Nil ys = ys
+append (x :> xs) (ys) = x :> (append xs ys)
+
+fromList :: [a] -> VectWithUnknownLength a
+fromList [] = VectWithUnknownLength Nil
+fromList (x:xs) = case fromList xs of
+  VectWithUnknownLength vectxs -> VectWithUnknownLength (x :> vectxs)
+
+instance Show a => Show (Vect n a) where
+  show Nil = "Nil"
+  show (x :> xs) = show x ++ " :> " ++ show xs
 
 instance Functor (Vect n) where
   fmap _ Nil = Nil
@@ -176,4 +210,9 @@ gatherer [] = []
 gatherer ((x,p) : xs) =
    let lyln = splitBy (\(z,_) -> z == x) xs
        newp = (+) p . sum $ map snd (fst lyln)
-   in  (x,newp) :: gatherer (snd lyln)
+   in  (x,newp) : gatherer (snd lyln)
+
+splitBy :: (a -> Bool) -> [a] -> ([a], [a])
+splitBy _ [] = ([], [])
+splitBy pred (x:xs) = let (s, t) = splitBy pred xs in
+  if pred x then (x:s, t) else (s, x:t)
