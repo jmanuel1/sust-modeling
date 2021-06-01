@@ -6,6 +6,9 @@
 - calculate distribution exhaustively
 - calculate distribution by sampling (Monte Carlo method)
 - take a sample of a distribution
+** implementations
+- defining a monadic 'instruction set' and writing various interpreters
+- [[https://www.youtube.com/watch?v=BN3JAuGlOgM][free monads]]
 
 * proving properties of a model
 ** total population of all species constant in a very simple population model
@@ -13,6 +16,9 @@
 * tracking the 'error bars' in a calculation and being able to specify constraints on them
 
 * correct use of units
+** in spreadsheets
+- [[https://web.engr.oregonstate.edu/~erwig/papers/EndUserTypeSystem_VLHCC07.pdf]]
+- [[https://dl.acm.org/doi/10.1145/1140335.1140346]]
 
 * automatic differentiation
 
@@ -33,3 +39,14 @@
 
 * explanation-oriented programming
 - [[https://web.engr.oregonstate.edu/~erwig/papers/VisExplProbReasoning_VLHCC09.pdf]]
+
+* visual programming
+- [[https://web.engr.oregonstate.edu/~erwig/papers/VLSemantics_VL97.pdf]]
+- [[https://web.engr.oregonstate.edu/~erwig/papers/VisualStrategies_VLHCC08.pdf][A Visual Language for Representing and Explaining Strategies in Game Theory]]
+** visual type inference
+- [[https://web.engr.oregonstate.edu/~erwig/papers/VisualTypeInf_JVLC06.pdf]]
+
+* spatio-temporal query language
+- [[https://web.engr.oregonstate.edu/~erwig/papers/Developments_STDML99.pdf]]
+
+Applicable to GIS?
