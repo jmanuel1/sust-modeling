@@ -17,6 +17,7 @@ Imports.
 > import Numeric.Natural
 > import qualified Data.Type.Nat as TNat
 > import Math.Combinatorics.Exact.Binomial
+> import qualified Data.Map as Map
 
 > main :: IO ()
 > main = do
@@ -40,7 +41,9 @@ reasonable amount of time on my machine.
 >   print (gatherer (case runProb dist of NonEmptyVect xs -> toList xs))
 >   putStrLn ""
 >   gen <- getStdGen
->   print (case runSampled distMoreSteps 100 gen of (NonEmptyVect xs, _) -> toList xs)
+>   let sampleDist = case runSampledProb distMoreSteps 100 gen of (VectWithUnknownLength xs, _) -> toList xs
+>   print sampleDist
+>   print (sum (snd <$> sampleDist))
 >   putStrLn ""
 
 The simulate function is the translation of the model described under the
@@ -86,7 +89,8 @@ That's why I alias Natural as Nat.
 >   Plus (TNat.S a) b = TNat.S (Plus a b)
 
 My probability monad. Notice that runProb is not used in these definitions; it's
-up to runProb to interpret a probability distrubution and compute a result.
+up to runProb and runSampledProb to interpret a probability distrubution and
+compute a result.
 
 > data Prob :: * -> * where
 >   Binomial :: Nat -> Double -> Prob Nat
@@ -177,7 +181,11 @@ up to runProb to interpret a probability distrubution and compute a result.
 > instance Functor (Vect n) where
 >   fmap _ Nil = Nil
 >   fmap f (x :> xs) = f x :> fmap f xs
->
+
+> instance Foldable (Vect n) where
+>   foldMap f Nil = mempty
+>   foldMap f (x :> xs) = f x <> foldMap f xs
+
 > gather :: (Eq a) => Prob a -> Prob a
 > -- FIXME: Adapt this function for vects
 > -- gather (CustomDist d) = CustomDist (gatherer d)
@@ -223,11 +231,27 @@ Generates a (pseudo)-random float between 0 and 1.
 >       dist = runProb prob
 >   in case dist of NonEmptyVect dist -> (select probability dist 0.0, gen')
 
-> runSampled :: RandomGen g => Prob a -> Nat -> g -> (NonEmptyVect a, g)
-> runSampled prob 0 gen =
->   let (observed, gen') = sample prob gen
->   in (NonEmptyVect (observed :> Nil), gen')
+> runSampledProb :: (Ord a, RandomGen g) => Prob a -> Nat -> g -> (VectWithUnknownLength (a, Double), g)
+> runSampledProb prob size gen =
+>   let (samples, gen') = runSampled prob size gen
+>       counts' = case samples of VectWithUnknownLength s -> count s
+>       dist = case counts' of VectWithUnknownLength counts -> VectWithUnknownLength (normalize counts)
+>   in (dist, gen')
+
+> normalize :: Vect n (a, Nat) -> Vect n (a, Double)
+> normalize counts = second (\c -> fromIntegral c / fromIntegral totalCount) <$> counts where
+>   totalCount = foldr (\(_, c) t -> c + t) 0 counts
+
+> count :: Ord a => Vect n a -> VectWithUnknownLength (a, Nat)
+> count as = fromList (Map.toAscList (count' as Map.empty))
+
+> count' :: Ord a => Vect n a -> Map.Map a Nat -> Map.Map a Nat
+> count' Nil map = map
+> count' (a :> as) map = Map.insertWith (+) a 1 (count' as map)
+
+> runSampled :: RandomGen g => Prob a -> Nat -> g -> (VectWithUnknownLength a, g)
+> runSampled prob 0 gen = (VectWithUnknownLength Nil, gen)
 > runSampled prob size gen =
 >   let (observeds, gen') = runSampled prob (size - 1) gen
 >       (observed, gen'') = sample prob gen'
->   in case observeds of NonEmptyVect observeds -> (NonEmptyVect (observed :> observeds), gen'')
+>   in case observeds of VectWithUnknownLength observeds -> (VectWithUnknownLength (observed :> observeds), gen'')
