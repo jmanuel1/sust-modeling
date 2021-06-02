@@ -41,7 +41,7 @@ reasonable amount of time on my machine.
 >   print (gatherer (case runProb dist of NonEmptyVect xs -> toList xs))
 >   putStrLn ""
 >   gen <- getStdGen
->   let sampleDist = case runSampledProb distMoreSteps 100 gen of (VectWithUnknownLength xs, _) -> toList xs
+>   let sampleDist = case runRandomProcess (runSampledProb distMoreSteps 100) gen of (VectWithUnknownLength xs, _) -> toList xs
 >   print sampleDist
 >   print (sum (snd <$> sampleDist))
 >   putStrLn ""
@@ -88,9 +88,9 @@ That's why I alias Natural as Nat.
 >   Plus TNat.Z a = a
 >   Plus (TNat.S a) b = TNat.S (Plus a b)
 
-My probability monad. Notice that runProb is not used in these definitions; it's
-up to runProb and runSampledProb to interpret a probability distrubution and
-compute a result.
+My probability monad. Notice that no interpreter is used in these definitions;
+it's up to runProb and runSampledProb to interpret a probability distrubution
+and compute a result.
 
 > data Prob :: * -> * where
 >   Binomial :: Nat -> Double -> Prob Nat
@@ -122,6 +122,11 @@ compute a result.
 >   (Bind fa f) >>= g = fa >>= (f >=> g)
 >   fa >>= f = Bind fa f
 
+This interpreter computes a distribution by computing the probability of every
+single possible outcome. Since the number of operations that have to be
+performed grows exponentially with the number of binds, runProb is too slow for
+all but the smallest distributions.
+
 > runProb :: Prob a -> NonEmptyVect (a, Double)
 > runProb (Binomial n p) = case fromList [1..n] of
 >   VectWithUnknownLength support -> NonEmptyVect ((\k -> (k, binomialPMF n p k)) <$> 0 :> support)
@@ -136,6 +141,11 @@ compute a result.
 
 > probfAs :: Prob b -> (b -> Prob a) -> NonEmptyVect (NonEmptyVect (a, Double), Double)
 > probfAs probA f = case runProb probA of NonEmptyVect xs -> NonEmptyVect ((\(x,p) -> (runProb (f x), p)) <$> xs)
+
+binomialPMF n p is the probability mass function of the binomial distribution
+B(n, p), where n is the number of trials and p is the probability of success for
+each trial. binomialPMF n p k is the probability that there are k successes out
+of n trials.
 
 > binomialPMF :: Nat -> Double -> Nat -> Double
 > binomialPMF n p k = fromIntegral (n `choose` k) * (p ^^ k) * ((1.0 - p) ^^ (n - k))
@@ -156,20 +166,22 @@ compute a result.
 >
 > data VectWithUnknownLength :: * -> * where
 >   VectWithUnknownLength :: Vect n a -> VectWithUnknownLength a
->
+
+A vector type that keeps its size in its type.
+
 > data Vect :: TNat.Nat -> * -> * where
 >   Nil :: Vect TNat.Z a
 >   (:>) :: a -> Vect n a -> Vect (TNat.S n) a
->
+
 > append :: Vect n a -> Vect m a -> Vect (Plus n m) a
 > append Nil ys = ys
 > append (x :> xs) ys = x :> append xs ys
->
+
 > fromList :: [a] -> VectWithUnknownLength a
 > fromList [] = VectWithUnknownLength Nil
 > fromList (x:xs) = case fromList xs of
 >   VectWithUnknownLength vectxs -> VectWithUnknownLength (x :> vectxs)
->
+
 > toList :: Vect n a -> [a]
 > toList Nil = []
 > toList (x :> xs) = x : toList xs
@@ -207,6 +219,13 @@ compute a result.
 Monte Carlo Prob interpreter: we can approximate distrubutions through repeated
 sampling.
 
+> runSampledProb :: (Ord a, RandomGen g) => Prob a -> Nat -> RandomProcess g (VectWithUnknownLength (a, Double))
+> runSampledProb prob size = do
+>   samples <- runSampled prob size
+>   let counts' = case samples of VectWithUnknownLength s -> count s
+>   let dist = case counts' of VectWithUnknownLength counts -> VectWithUnknownLength (normalize counts)
+>   pure dist
+
 > select :: Double -> Vect (TNat.S n) (a, Double) -> Double -> a
 > select _ ((x, p) :> Nil) _ = x
 > select target ((x, p):>xps) current =
@@ -218,25 +237,17 @@ sampling.
 
 Generates a (pseudo)-random float between 0 and 1.
 
-> rndDouble :: RandomGen g => g -> (Double, g)
-> rndDouble = random
+> rndDouble :: RandomGen g => RandomProcess g Double
+> rndDouble = RandomProcess random
 
-> sample :: RandomGen g => Prob a -> g -> (a, g)
-> sample (Bind prob f) gen =
->   let (observedFromProb, gen') = sample prob gen
->       result = sample (f observedFromProb) gen'
->   in result
-> sample prob gen =
->   let (probability, gen') = rndDouble gen
->       dist = runProb prob
->   in case dist of NonEmptyVect dist -> (select probability dist 0.0, gen')
-
-> runSampledProb :: (Ord a, RandomGen g) => Prob a -> Nat -> g -> (VectWithUnknownLength (a, Double), g)
-> runSampledProb prob size gen =
->   let (samples, gen') = runSampled prob size gen
->       counts' = case samples of VectWithUnknownLength s -> count s
->       dist = case counts' of VectWithUnknownLength counts -> VectWithUnknownLength (normalize counts)
->   in (dist, gen')
+> sample :: RandomGen g => Prob a -> RandomProcess g a
+> sample (Bind prob f) = do
+>   observedFromProb <- sample prob
+>   sample (f observedFromProb)
+> sample prob = do
+>   probability <- rndDouble
+>   let dist = runProb prob
+>   case dist of NonEmptyVect dist -> pure (select probability dist 0.0)
 
 > normalize :: Vect n (a, Nat) -> Vect n (a, Double)
 > normalize counts = second (\c -> fromIntegral c / fromIntegral totalCount) <$> counts where
@@ -249,9 +260,31 @@ Generates a (pseudo)-random float between 0 and 1.
 > count' Nil map = map
 > count' (a :> as) map = Map.insertWith (+) a 1 (count' as map)
 
-> runSampled :: RandomGen g => Prob a -> Nat -> g -> (VectWithUnknownLength a, g)
-> runSampled prob 0 gen = (VectWithUnknownLength Nil, gen)
-> runSampled prob size gen =
->   let (observeds, gen') = runSampled prob (size - 1) gen
->       (observed, gen'') = sample prob gen'
->   in case observeds of VectWithUnknownLength observeds -> (VectWithUnknownLength (observed :> observeds), gen'')
+A sort of more fundamental interpreter which computes a list of observations
+from a probability distribution.
+
+> runSampled :: RandomGen g => Prob a -> Nat -> RandomProcess g (VectWithUnknownLength a)
+> runSampled prob 0 = pure (VectWithUnknownLength Nil)
+> runSampled prob size = do
+>   observeds <- runSampled prob (size - 1)
+>   observed <- sample prob
+>   case observeds of VectWithUnknownLength observeds -> pure (VectWithUnknownLength (observed :> observeds))
+
+> -- TODO: Just use an alias/wrapper for the State monad
+> newtype RandomProcess g a = RandomProcess {runRandomProcess :: g -> (a, g)}
+
+> instance Monad (RandomProcess g) where
+>   (RandomProcess process) >>= f = RandomProcess (\gen ->
+>     let (a, gen') = process gen
+>         (RandomProcess p) = f a
+>     in p gen')
+
+> instance Applicative (RandomProcess g) where
+>   pure a = RandomProcess (\gen -> (a, gen))
+>   (RandomProcess randomF) <*> (RandomProcess randomA) = RandomProcess (\gen ->
+>     let (f, gen') = randomF gen
+>         (a, gen'') = randomA gen'
+>     in (f a, gen''))
+
+> instance Functor (RandomProcess g) where
+>   fmap f (RandomProcess process) = RandomProcess (first f . process)
