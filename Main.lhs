@@ -13,13 +13,17 @@ Imports.
 > import Data.Void
 > import Data.Bifunctor
 > import Control.Monad
+> import System.Random
+> import Numeric.Natural
+> import qualified Data.Type.Nat as TNat
+> import Math.Combinatorics.Exact.Binomial
 
 > main :: IO ()
 > main = do
 >   let
 
 Form a probability distribution over the possible results of a population
-simulation running for five steps. The initial parameters are:
+simulation running for five steps, and name it dist. The initial parameters are:
 
 Population of first species: 1
 Population of second species: 1
@@ -29,10 +33,14 @@ reasonable amount of time on my machine.
 
 >     dist :: Prob (Nat, Nat)
 >     dist = simulate 1 1 5
+>     distMoreSteps = simulate 25 25 250
 >   putStrLn "dist"
 >   print dist
 >   putStrLn ""
->   print (gatherer (case runProb dist of NonEmptyVect (xs :: Vect (S k) ((Nat, Nat), Double)) -> toList xs))
+>   print (gatherer (case runProb dist of NonEmptyVect xs -> toList xs))
+>   putStrLn ""
+>   gen <- getStdGen
+>   print (case runSampled distMoreSteps 100 gen of (NonEmptyVect xs, _) -> toList xs)
 >   putStrLn ""
 
 The simulate function is the translation of the model described under the
@@ -40,10 +48,10 @@ section "Forward Simulations" at
 https://esajournals.onlinelibrary.wiley.com/doi/10.1890/0012-9623-93.4.373.
 
 > simulate :: Nat -> Nat -> Nat -> Prob (Nat, Nat)
-> simulate species1Initial species2Initial Z = pure (species1Initial, species2Initial)
-> simulate species1Initial species2Initial (S k) = gather $ do
+> simulate species1Initial species2Initial 0 = pure (species1Initial, species2Initial)
+> simulate species1Initial species2Initial k = gather $ do
 >   (n1, n2) <- step species1Initial species2Initial
->   gather $ simulate n1 n2 k
+>   gather $ simulate n1 n2 (k - 1)
 
 The step function corresponds to the "For each year" part of the pseudo-code in
 the article. It uses some smaller functions to implement the instructions in the
@@ -53,14 +61,14 @@ pseudo-code. These functions are based on the probability monad defined below.
 > step n1 n2 = gather $ do
 >   dead1 <- kill n1 mortalityRate
 >   dead2 <- kill n2 mortalityRate
->   gather $ (\(new1,new2) -> ((n1 `minus` dead1) + new1, (n2 `minus` dead2) + new2)) <$> replace dead1 dead2
+>   gather $ (\(new1,new2) -> ((n1 - dead1) + new1, (n2 - dead2) + new2)) <$> replace dead1 dead2
 
 > kill :: Nat -> Double -> Prob Nat
 > kill = binomial
 
 > replace :: Nat -> Nat -> Prob (Nat, Nat)
-> replace n1 n2 = gather $ replace' <$> binomial (n1 + n2) (natToDouble n1 / natToDouble (n1 + n2)) where
->   replace' n1' = (n1', (n1 + n2) `minus` n1')
+> replace n1 n2 = gather $ replace' <$> binomial (n1 + n2) (fromIntegral n1 / fromIntegral (n1 + n2)) where
+>   replace' n1' = (n1', (n1 + n2) - n1')
 >
 > binomial :: Nat -> Double -> Prob Nat
 > binomial = Binomial
@@ -68,53 +76,14 @@ pseudo-code. These functions are based on the probability monad defined below.
 > mortalityRate :: Double
 > mortalityRate = 0.03
 
-All this Nat code is here because I originally wrote this program in Idris,
-where I made use of its Nat type. I should probably get rid of it somehow.
+I originally wrote this program in Idris, where I made use of its Nat type.
+That's why I alias Natural as Nat.
 
-> data Nat = Z | S Nat deriving (Eq, Ord)
->
-> instance Show Nat where
->   show n = show (natToInteger n)
->
-> instance Num Nat where
->   (+) a b = fromInteger (natToInteger a + natToInteger b)
->   (*) a b = fromInteger (natToInteger a * natToInteger b)
->   abs = id
->   signum Z = Z
->   signum _ = S Z
->   fromInteger 0 = Z
->   fromInteger n = S (fromInteger (n - 1))
->   negate n = undefined -- FIXME
->
-> instance Enum Nat where
->   toEnum 0 = Z
->   toEnum n = S (toEnum (n - 1))
->   fromEnum n = natToInteger n
->
-> instance Real Nat where
->   toRational n = toRational (natToInteger n)
->
-> instance Integral Nat where
->   quotRem a b = (fromInteger (natToInteger a `div` natToInteger b), fromInteger (natToInteger a `rem` natToInteger b))
->   toInteger = natToInteger
->
-> natToInteger Z = 0
-> natToInteger (S n) = 1 + natToInteger n
->
-> natToDouble n = 1.0 * natToInteger n
->
-> minus :: Nat -> Nat -> Nat
-> minus a Z = a
-> minus (S a) (S b) = minus a b
-> minus Z b = Z
->
-> type family Mult (a :: Nat) b :: Nat where
->   Mult _ Z = Z
->   Mult a (S b) = Plus a (Mult a b)
->
-> type family Plus (a :: Nat) b :: Nat where
->   Plus Z a = a
->   Plus (S a) b = S (Plus a b)
+> type Nat = Natural
+
+> type family Plus (a :: TNat.Nat) b :: TNat.Nat where
+>   Plus TNat.Z a = a
+>   Plus (TNat.S a) b = TNat.S (Plus a b)
 
 My probability monad. Notice that runProb is not used in these definitions; it's
 up to runProb to interpret a probability distrubution and compute a result.
@@ -123,15 +92,15 @@ up to runProb to interpret a probability distrubution and compute a result.
 >   Binomial :: Nat -> Double -> Prob Nat
 >   Certainly :: a -> Prob a
 >   Bind :: Prob a -> (a -> Prob b) -> Prob b
->   CustomDist :: Vect (S n) (a, Double) -> Prob a
->
+>   CustomDist :: Vect (TNat.S n) (a, Double) -> Prob a
+
 > instance Show a => Show (Prob a) where
 >   show (Binomial n p) = "Binomial " ++ show n ++ " " ++ show p
 >   show (Certainly a) = "Certainly " ++ show a
 >   show (Bind (Binomial n p) _) = "Bind (" ++ show (Binomial n p) ++ ") <function>"
 >   show (Bind a _) = "Bind <dist> <function>"
 >   show (CustomDist d) = "CustomDist " ++ show d
->
+
 > instance Functor Prob where
 >   fmap f (Certainly a) = Certainly $ f a
 >   fmap f (Bind a g) = Bind a (fmap f . g)
@@ -165,46 +134,28 @@ up to runProb to interpret a probability distrubution and compute a result.
 > probfAs probA f = case runProb probA of NonEmptyVect xs -> NonEmptyVect ((\(x,p) -> (runProb (f x), p)) <$> xs)
 
 > binomialPMF :: Nat -> Double -> Nat -> Double
-> binomialPMF n p k = natToDouble (n `choose` k) * (p ^^ k) * ((1.0 - p) ^^ (n `minus` k))
-
-> choose :: Nat -> Nat -> Nat
-> choose _ Z = 1
-> choose (S n) (S Z) = S n
-> choose Z (S _) = 0
-> -- if n < k then n `choose` k = 0
-> choose n k = divNatNZ (divNatNZ (fact n) (fact (n `minus` k))) (fact k)
-
-> fact :: Nat -> Nat
-> fact Z = S Z
-> fact (S n) = S n * fact n
-
-> type family Fact n :: Nat where
->   Fact Z = S Z
->   Fact (S n) = Mult (S n) (Fact n)
-
-> divNatNZ :: Nat -> Nat -> Nat
-> divNatNZ a b = fromInteger (natToInteger a `div` natToInteger b)
+> binomialPMF n p k = fromIntegral (n `choose` k) * (p ^^ k) * ((1.0 - p) ^^ (n - k))
 
 > concatNonempty' :: Vect n (VectWithUnknownLength a) -> VectWithUnknownLength a
 > concatNonempty' Nil = VectWithUnknownLength Nil
 > concatNonempty' ((VectWithUnknownLength x1):>xs) = case concatNonempty' xs of
 >   VectWithUnknownLength xs' -> VectWithUnknownLength (x1 `append` xs')
 
-> concatNonempty :: Vect (S n) (NonEmptyVect a) -> NonEmptyVect a
+> concatNonempty :: Vect (TNat.S n) (NonEmptyVect a) -> NonEmptyVect a
 > concatNonempty (x :> Nil) = x
 > -- concatNonempty [x1, x2] = (_ ** (snd x1) ++ (snd x2))
 > concatNonempty ((NonEmptyVect x1):>xs) = case concatNonempty' ((\(NonEmptyVect ys) -> VectWithUnknownLength ys) <$> xs) of
 >   VectWithUnknownLength xs' -> NonEmptyVect (x1 `append` xs')
 >
 > data NonEmptyVect :: * -> * where
->   NonEmptyVect :: Vect (S n) a -> NonEmptyVect a
+>   NonEmptyVect :: Vect (TNat.S n) a -> NonEmptyVect a
 >
 > data VectWithUnknownLength :: * -> * where
 >   VectWithUnknownLength :: Vect n a -> VectWithUnknownLength a
 >
-> data Vect :: Nat -> * -> * where
->   Nil :: Vect Z a
->   (:>) :: a -> Vect n a -> Vect (S n) a
+> data Vect :: TNat.Nat -> * -> * where
+>   Nil :: Vect TNat.Z a
+>   (:>) :: a -> Vect n a -> Vect (TNat.S n) a
 >
 > append :: Vect n a -> Vect m a -> Vect (Plus n m) a
 > append Nil ys = ys
@@ -244,3 +195,39 @@ up to runProb to interpret a probability distrubution and compute a result.
 > splitBy _ [] = ([], [])
 > splitBy pred (x:xs) = let (s, t) = splitBy pred xs in
 >   if pred x then (x:s, t) else (s, x:t)
+
+Monte Carlo Prob interpreter: we can approximate distrubutions through repeated
+sampling.
+
+> select :: Double -> Vect (TNat.S n) (a, Double) -> Double -> a
+> select _ ((x, p) :> Nil) _ = x
+> select target ((x, p):>xps) current =
+>   if target <= current + p
+>     then x
+>     else case xps of
+>       Nil -> x
+>       (xp:>xps') -> select target (xp:>xps') (current + p)
+
+Generates a (pseudo)-random float between 0 and 1.
+
+> rndDouble :: RandomGen g => g -> (Double, g)
+> rndDouble = random
+
+> sample :: RandomGen g => Prob a -> g -> (a, g)
+> sample (Bind prob f) gen =
+>   let (observedFromProb, gen') = sample prob gen
+>       result = sample (f observedFromProb) gen'
+>   in result
+> sample prob gen =
+>   let (probability, gen') = rndDouble gen
+>       dist = runProb prob
+>   in case dist of NonEmptyVect dist -> (select probability dist 0.0, gen')
+
+> runSampled :: RandomGen g => Prob a -> Nat -> g -> (NonEmptyVect a, g)
+> runSampled prob 0 gen =
+>   let (observed, gen') = sample prob gen
+>   in (NonEmptyVect (observed :> Nil), gen')
+> runSampled prob size gen =
+>   let (observeds, gen') = runSampled prob (size - 1) gen
+>       (observed, gen'') = sample prob gen'
+>   in case observeds of NonEmptyVect observeds -> (NonEmptyVect (observed :> observeds), gen'')
