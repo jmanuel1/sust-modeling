@@ -227,14 +227,17 @@ sampling.
 >   let dist = vectFromList counts (toList . normalize)
 >   pure dist
 
-> select :: Double -> Vect (TNat.S n) (a, Double) -> Double -> a
-> select _ ((x, p) :> Nil) _ = x
-> select target ((x, p):>xps) current =
+Computes an inverse cumulative mass function from the shape of a discrete
+distribution. The first argument is the target cumulative probability, and the
+third argument is an accumulator that should be set to 0.0 by other functions.
+
+> inverseCMF :: Double -> Vect (TNat.S n) (a, Double) -> Double -> a
+> inverseCMF target ((x, p):>xps) current =
 >   if target <= current + p
 >     then x
 >     else case xps of
 >       Nil -> x
->       (xp:>xps') -> select target (xp:>xps') (current + p)
+>       (xp:>xps') -> inverseCMF target (xp:>xps') (current + p)
 
 Generates a (pseudo)-random float between 0 and 1.
 
@@ -252,7 +255,7 @@ Generates a (pseudo)-random float between 0 and 1.
 > sample prob = do
 >   probability <- rndDouble
 >   let dist = runProb prob
->   pure (withNonEmptyVect dist (\dist -> select probability dist 0.0))
+>   pure (withNonEmptyVect dist (\dist -> inverseCMF probability dist 0.0))
 
 > normalize :: Vect n (a, Nat) -> Vect n (a, Double)
 > normalize counts = second (\c -> fromIntegral c / fromIntegral totalCount) <$> counts where
