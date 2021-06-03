@@ -20,6 +20,8 @@ Imports.
 > import Math.Combinatorics.Exact.Binomial
 > import qualified Data.Map as Map
 > import Control.Monad.State.Lazy
+> import qualified Data.List.NonEmpty as NE
+> import Data.List.NonEmpty (NonEmpty(..))
 
 > main :: IO ()
 > main = do
@@ -40,7 +42,7 @@ reasonable amount of time on my machine.
 >   putStrLn "dist"
 >   print dist
 >   putStrLn ""
->   print (gatherer (case runProb dist of NonEmptyVect xs -> toList xs))
+>   print (gatherer (NE.toList (runProb dist)))
 >   putStrLn ""
 >   gen <- getStdGen
 >   let sampleDist = fst $ runRandomProcess (runSampledProb distMoreSteps 100) gen
@@ -129,21 +131,19 @@ single possible outcome. Since the number of operations that have to be
 performed grows exponentially with the number of binds, runProb is too slow for
 all but the smallest distributions.
 
-> runProb :: Prob a -> NonEmptyVect (a, Double)
-> runProb (Binomial n p) = let support = [1..n] in
->   case nonEmptyVectFromList 0 support of
->     NonEmptyVect support' -> NonEmptyVect ((\k -> (k, binomialPMF n p k)) <$> support')
-> runProb (Certainly a) = NonEmptyVect ((a, 1.0) :> Nil)
+> runProb :: Prob a -> NE.NonEmpty (a, Double)
+> runProb (Binomial n p) = let support = 0 :| [1..n] in
+>   ((\k -> (k, binomialPMF n p k)) <$> support)
+> runProb (Certainly a) = (a, 1.0) :| []
 > runProb (Bind probA f) =
->   case joinedPartly probA f of NonEmptyVect xs -> concatNonempty xs
-> runProb (CustomDist d) = NonEmptyVect d
+>   let (x :| xs) = joinedPartly probA f in vectFromList xs (\xs' -> concatNonempty (x :> xs'))
+> runProb (CustomDist (d :> ds)) = d :| toList ds
 
-> joinedPartly :: Prob a -> (a -> Prob b) -> NonEmptyVect (NonEmptyVect (b, Double))
-> joinedPartly probA f = case probfAs probA f of
->   NonEmptyVect pfAs -> NonEmptyVect ((\(NonEmptyVect dist,p) -> NonEmptyVect (second (p *) <$> dist)) <$> pfAs)
+> joinedPartly :: Prob a -> (a -> Prob b) -> NE.NonEmpty (NE.NonEmpty (b, Double))
+> joinedPartly probA f = let pfAs = probfAs probA f in ((\(dist,p) -> second (p *) <$> dist) <$> pfAs)
 
-> probfAs :: Prob b -> (b -> Prob a) -> NonEmptyVect (NonEmptyVect (a, Double), Double)
-> probfAs probA f = case runProb probA of NonEmptyVect xs -> NonEmptyVect ((\(x,p) -> (runProb (f x), p)) <$> xs)
+> probfAs :: Prob b -> (b -> Prob a) -> NE.NonEmpty (NE.NonEmpty (a, Double), Double)
+> probfAs probA f = let xs = runProb probA in (\(x,p) -> (runProb (f x), p)) <$> xs
 
 binomialPMF n p is the probability mass function of the binomial distribution
 B(n, p), where n is the number of trials and p is the probability of success for
@@ -158,21 +158,13 @@ of n trials.
 > concatNonempty' (x1:>xs) = let xs' = concatNonempty' xs in
 >   x1 ++ xs'
 
-> concatNonempty :: Vect (TNat.S n) (NonEmptyVect a) -> NonEmptyVect a
+> concatNonempty :: Vect (TNat.S n) (NE.NonEmpty a) -> NE.NonEmpty a
 > concatNonempty (x :> Nil) = x
 > -- concatNonempty [x1, x2] = (_ ** (snd x1) ++ (snd x2))
-> concatNonempty ((NonEmptyVect x1):>xs) = let xs' = concatNonempty' ((\(NonEmptyVect ys) -> toList ys) <$> xs) in
->   vectFromList xs' (\vectxs -> NonEmptyVect (x1 `append` vectxs))
-
-> data NonEmptyVect :: * -> * where
->   NonEmptyVect :: Vect (TNat.S n) a -> NonEmptyVect a
-
-> nonEmptyVectFromList :: a -> [a] -> NonEmptyVect a
-> nonEmptyVectFromList a as = vectFromList as (\as' -> NonEmptyVect (a :> as'))
-
-> vectFromList :: [a] -> (forall n. Vect n a -> r) -> r
-> vectFromList [] k = k Nil
-> vectFromList (x:xs) k = vectFromList xs (\xs' -> k (x :> xs'))
+> concatNonempty (x1:>xs) =
+>   let xs' = concatNonempty' (NE.toList <$> xs)
+>       (x1head :| x1s) = x1
+>   in x1head :| (x1s ++ xs')
 
 A vector type that keeps its size in its type.
 
@@ -187,7 +179,14 @@ A vector type that keeps its size in its type.
 > toList :: Vect n a -> [a]
 > toList Nil = []
 > toList (x :> xs) = x : toList xs
->
+
+> vectFromList :: [a] -> (forall n. Vect n a -> r) -> r
+> vectFromList [] k = k Nil
+> vectFromList (x:xs) k = vectFromList xs (\xs' -> k (x :> xs'))
+
+> withNonEmptyVect :: NE.NonEmpty a -> (forall n. Vect (TNat.S n) a -> r) -> r
+> withNonEmptyVect (x :| xs) k = vectFromList xs (\xs' -> k (x :> xs'))
+
 > instance Show a => Show (Vect n a) where
 >   show Nil = "Nil"
 >   show (x :> xs) = show x ++ " :> " ++ show xs
@@ -253,7 +252,7 @@ Generates a (pseudo)-random float between 0 and 1.
 > sample prob = do
 >   probability <- rndDouble
 >   let dist = runProb prob
->   case dist of NonEmptyVect dist -> pure (select probability dist 0.0)
+>   pure (withNonEmptyVect dist (\dist -> select probability dist 0.0))
 
 > normalize :: Vect n (a, Nat) -> Vect n (a, Double)
 > normalize counts = second (\c -> fromIntegral c / fromIntegral totalCount) <$> counts where
