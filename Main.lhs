@@ -5,6 +5,7 @@ Language extensions.
 > {-# LANGUAGE TypeFamilies #-}
 > {-# LANGUAGE UndecidableInstances #-}
 > {-# LANGUAGE ScopedTypeVariables #-}
+> {-# LANGUAGE RankNTypes #-}
 
 Imports.
 
@@ -42,7 +43,7 @@ reasonable amount of time on my machine.
 >   print (gatherer (case runProb dist of NonEmptyVect xs -> toList xs))
 >   putStrLn ""
 >   gen <- getStdGen
->   let sampleDist = case runRandomProcess (runSampledProb distMoreSteps 100) gen of (VectWithUnknownLength xs, _) -> toList xs
+>   let sampleDist = fst $ runRandomProcess (runSampledProb distMoreSteps 100) gen
 >   print sampleDist
 >   print (sum (snd <$> sampleDist))
 >   putStrLn ""
@@ -129,8 +130,9 @@ performed grows exponentially with the number of binds, runProb is too slow for
 all but the smallest distributions.
 
 > runProb :: Prob a -> NonEmptyVect (a, Double)
-> runProb (Binomial n p) = case fromList [1..n] of
->   VectWithUnknownLength support -> NonEmptyVect ((\k -> (k, binomialPMF n p k)) <$> 0 :> support)
+> runProb (Binomial n p) = let support = [1..n] in
+>   case nonEmptyVectFromList 0 support of
+>     NonEmptyVect support' -> NonEmptyVect ((\k -> (k, binomialPMF n p k)) <$> support')
 > runProb (Certainly a) = NonEmptyVect ((a, 1.0) :> Nil)
 > runProb (Bind probA f) =
 >   case joinedPartly probA f of NonEmptyVect xs -> concatNonempty xs
@@ -151,22 +153,26 @@ of n trials.
 > binomialPMF :: Nat -> Double -> Nat -> Double
 > binomialPMF n p k = fromIntegral (n `choose` k) * (p ^^ k) * ((1.0 - p) ^^ (n - k))
 
-> concatNonempty' :: Vect n (VectWithUnknownLength a) -> VectWithUnknownLength a
-> concatNonempty' Nil = VectWithUnknownLength Nil
-> concatNonempty' ((VectWithUnknownLength x1):>xs) = case concatNonempty' xs of
->   VectWithUnknownLength xs' -> VectWithUnknownLength (x1 `append` xs')
+> concatNonempty' :: Vect n [a] -> [a]
+> concatNonempty' Nil = []
+> concatNonempty' (x1:>xs) = let xs' = concatNonempty' xs in
+>   x1 ++ xs'
 
 > concatNonempty :: Vect (TNat.S n) (NonEmptyVect a) -> NonEmptyVect a
 > concatNonempty (x :> Nil) = x
 > -- concatNonempty [x1, x2] = (_ ** (snd x1) ++ (snd x2))
-> concatNonempty ((NonEmptyVect x1):>xs) = case concatNonempty' ((\(NonEmptyVect ys) -> VectWithUnknownLength ys) <$> xs) of
->   VectWithUnknownLength xs' -> NonEmptyVect (x1 `append` xs')
->
+> concatNonempty ((NonEmptyVect x1):>xs) = let xs' = concatNonempty' ((\(NonEmptyVect ys) -> toList ys) <$> xs) in
+>   vectFromList xs' (\vectxs -> NonEmptyVect (x1 `append` vectxs))
+
 > data NonEmptyVect :: * -> * where
 >   NonEmptyVect :: Vect (TNat.S n) a -> NonEmptyVect a
->
-> data VectWithUnknownLength :: * -> * where
->   VectWithUnknownLength :: Vect n a -> VectWithUnknownLength a
+
+> nonEmptyVectFromList :: a -> [a] -> NonEmptyVect a
+> nonEmptyVectFromList a as = vectFromList as (\as' -> NonEmptyVect (a :> as'))
+
+> vectFromList :: [a] -> (forall n. Vect n a -> r) -> r
+> vectFromList [] k = k Nil
+> vectFromList (x:xs) k = vectFromList xs (\xs' -> k (x :> xs'))
 
 A vector type that keeps its size in its type.
 
@@ -177,11 +183,6 @@ A vector type that keeps its size in its type.
 > append :: Vect n a -> Vect m a -> Vect (Plus n m) a
 > append Nil ys = ys
 > append (x :> xs) ys = x :> append xs ys
-
-> fromList :: [a] -> VectWithUnknownLength a
-> fromList [] = VectWithUnknownLength Nil
-> fromList (x:xs) = case fromList xs of
->   VectWithUnknownLength vectxs -> VectWithUnknownLength (x :> vectxs)
 
 > toList :: Vect n a -> [a]
 > toList Nil = []
@@ -220,11 +221,11 @@ A vector type that keeps its size in its type.
 Monte Carlo Prob interpreter: we can approximate distrubutions through repeated
 sampling.
 
-> runSampledProb :: (Ord a, RandomGen g) => Prob a -> Nat -> RandomProcess g (VectWithUnknownLength (a, Double))
+> runSampledProb :: (Ord a, RandomGen g) => Prob a -> Nat -> RandomProcess g [(a, Double)]
 > runSampledProb prob size = do
 >   samples <- runSampled prob size
->   let counts' = case samples of VectWithUnknownLength s -> count s
->   let dist = case counts' of VectWithUnknownLength counts -> VectWithUnknownLength (normalize counts)
+>   let counts = vectFromList samples count
+>   let dist = vectFromList counts (toList . normalize)
 >   pure dist
 
 > select :: Double -> Vect (TNat.S n) (a, Double) -> Double -> a
@@ -258,8 +259,8 @@ Generates a (pseudo)-random float between 0 and 1.
 > normalize counts = second (\c -> fromIntegral c / fromIntegral totalCount) <$> counts where
 >   totalCount = foldr (\(_, c) t -> c + t) 0 counts
 
-> count :: Ord a => Vect n a -> VectWithUnknownLength (a, Nat)
-> count as = fromList (Map.toAscList (count' as Map.empty))
+> count :: Ord a => Vect n a -> [(a, Nat)]
+> count as = Map.toAscList (count' as Map.empty)
 
 > count' :: Ord a => Vect n a -> Map.Map a Nat -> Map.Map a Nat
 > count' Nil map = map
@@ -268,12 +269,12 @@ Generates a (pseudo)-random float between 0 and 1.
 A sort of more fundamental interpreter which computes a list of observations
 from a probability distribution.
 
-> runSampled :: RandomGen g => Prob a -> Nat -> RandomProcess g (VectWithUnknownLength a)
-> runSampled prob 0 = pure (VectWithUnknownLength Nil)
+> runSampled :: RandomGen g => Prob a -> Nat -> RandomProcess g [a]
+> runSampled prob 0 = pure []
 > runSampled prob size = do
 >   observeds <- runSampled prob (size - 1)
 >   observed <- sample prob
->   case observeds of VectWithUnknownLength observeds -> pure (VectWithUnknownLength (observed :> observeds))
+>   pure (observed : observeds)
 
 RandomProcess is just an alias for the State monad that I use so that I don't
 have to pass around the random number generator state myself.
