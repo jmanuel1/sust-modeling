@@ -18,6 +18,7 @@ Imports.
 > import qualified Data.Type.Nat as TNat
 > import Math.Combinatorics.Exact.Binomial
 > import qualified Data.Map as Map
+> import Control.Monad.State.Lazy
 
 > main :: IO ()
 > main = do
@@ -238,7 +239,11 @@ sampling.
 Generates a (pseudo)-random float between 0 and 1.
 
 > rndDouble :: RandomGen g => RandomProcess g Double
-> rndDouble = RandomProcess random
+> rndDouble = do
+>   gen <- get
+>   let (a, gen') = random gen
+>   put gen'
+>   pure a
 
 > sample :: RandomGen g => Prob a -> RandomProcess g a
 > sample (Bind prob f) = do
@@ -270,21 +275,9 @@ from a probability distribution.
 >   observed <- sample prob
 >   case observeds of VectWithUnknownLength observeds -> pure (VectWithUnknownLength (observed :> observeds))
 
-> -- TODO: Just use an alias/wrapper for the State monad
-> newtype RandomProcess g a = RandomProcess {runRandomProcess :: g -> (a, g)}
+RandomProcess is just an alias for the State monad that I use so that I don't
+have to pass around the random number generator state myself.
 
-> instance Monad (RandomProcess g) where
->   (RandomProcess process) >>= f = RandomProcess (\gen ->
->     let (a, gen') = process gen
->         (RandomProcess p) = f a
->     in p gen')
+> type RandomProcess g a = State g a
 
-> instance Applicative (RandomProcess g) where
->   pure a = RandomProcess (\gen -> (a, gen))
->   (RandomProcess randomF) <*> (RandomProcess randomA) = RandomProcess (\gen ->
->     let (f, gen') = randomF gen
->         (a, gen'') = randomA gen'
->     in (f a, gen''))
-
-> instance Functor (RandomProcess g) where
->   fmap f (RandomProcess process) = RandomProcess (first f . process)
+> runRandomProcess = runState
