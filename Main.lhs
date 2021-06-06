@@ -10,9 +10,6 @@ Language extensions.
 Imports.
 
 > module Main where
-> import Data.Type.Equality
-> import Data.Void
-> import Data.Bifunctor
 > import Control.Monad
 > import System.Random
 > import Numeric.Natural
@@ -22,6 +19,9 @@ Imports.
 > import Control.Monad.State.Lazy
 > import qualified Data.List.NonEmpty as NE
 > import Data.List.NonEmpty (NonEmpty(..))
+> import Control.Monad.Free
+> import Data.Functor.Classes
+> import Data.Bifunctor (first, second)
 
 > main :: IO ()
 > main = do
@@ -76,10 +76,7 @@ pseudo-code. These functions are based on the probability monad defined below.
 > replace :: Nat -> Nat -> Prob (Nat, Nat)
 > replace n1 n2 = gather $ replace' <$> binomial (n1 + n2) (fromIntegral n1 / fromIntegral (n1 + n2)) where
 >   replace' n1' = (n1', (n1 + n2) - n1')
->
-> binomial :: Nat -> Double -> Prob Nat
-> binomial = Binomial
->
+
 > mortalityRate :: Double
 > mortalityRate = 0.03
 
@@ -92,39 +89,30 @@ That's why I alias Natural as Nat.
 >   Plus TNat.Z a = a
 >   Plus (TNat.S a) b = TNat.S (Plus a b)
 
-My probability monad. Notice that no interpreter is used in these definitions;
-it's up to runProb and runSampledProb to interpret a probability distrubution
-and compute a result.
+My probability monad, as a free monad. Notice that no interpreter is used in
+these definitions; it's up to runProb and runSampledProb to interpret a
+probability distrubution and compute a result.
 
-> data Prob :: * -> * where
->   Binomial :: Nat -> Double -> Prob Nat
->   Certainly :: a -> Prob a
->   Bind :: Prob a -> (a -> Prob b) -> Prob b
->   CustomDist :: Vect (TNat.S n) (a, Double) -> Prob a
+> type Prob a = Free Distribution a
 
-> instance Show a => Show (Prob a) where
->   show (Binomial n p) = "Binomial " ++ show n ++ " " ++ show p
->   show (Certainly a) = "Certainly " ++ show a
->   show (Bind (Binomial n p) _) = "Bind (" ++ show (Binomial n p) ++ ") <function>"
->   show (Bind a _) = "Bind <dist> <function>"
->   show (CustomDist d) = "CustomDist " ++ show d
+> data Distribution :: * -> * where
+>   Binomial :: Nat -> Double -> Distribution Nat
+>   CustomDist :: Vect (TNat.S n) (a, Double) -> Distribution a
 
-> instance Functor Prob where
->   fmap f (Certainly a) = Certainly $ f a
->   fmap f (Bind a g) = Bind a (fmap f . g)
->   fmap f (CustomDist d) = CustomDist $ first f <$> d
->   fmap f p = Bind p (Certainly . f)
+> instance Functor Distribution where
+>   fmap f (Binomial n p) = let support = 0 :| [1..n] in
+>     withNonEmptyVect ((\k -> (f k, binomialPMF n p k)) <$> support) CustomDist
+>   fmap f (CustomDist d) = CustomDist (first f <$> d)
 
-> instance Applicative Prob where
->   pure = Certainly
->   (Certainly f) <*> p = f <$> p
->   (Bind pa f) <*> p = Bind pa (\a -> f a <*> p)
->   (CustomDist d) <*> p = Bind (CustomDist d) (\f -> Bind p (pure . f))
+> binomial :: Nat -> Double -> Prob Nat
+> binomial n p = Free (Pure <$> Binomial n p)
 
-> instance Monad Prob where
->   (Certainly a) >>= f = f a
->   (Bind fa f) >>= g = fa >>= (f >=> g)
->   fa >>= f = Bind fa f
+> instance Show1 Distribution where
+>   liftShowsPrec _ _ _ (Binomial n p) = (++) ("(Binomial " ++ show n ++ " " ++ show p ++ ")")
+>   liftShowsPrec argShowsPrec _ _ (CustomDist d) = (++) ("(CustomDist " ++ showVect (argShowsPrec 0) d ++ ")") where
+>     showVect :: (a -> String -> String) -> Vect n (a, Double) -> String
+>     showVect _ Nil = "Nil"
+>     showVect showEl ((x, p) :> xs) = "((" ++ showEl x ", " ++ show p ++ ") :> " ++ showVect showEl xs ++ ")"
 
 This interpreter computes a distribution by computing the probability of every
 single possible outcome. Since the number of operations that have to be
@@ -132,18 +120,19 @@ performed grows exponentially with the number of binds, runProb is too slow for
 all but the smallest distributions.
 
 > runProb :: Prob a -> NE.NonEmpty (a, Double)
-> runProb (Binomial n p) = let support = 0 :| [1..n] in
+> runProb (Free dist) = flatten (first runProb <$> shape dist)
+> runProb (Pure value) = (value, 1.0) :| []
+
+> shape :: Distribution a -> NE.NonEmpty (a, Double)
+> shape (Binomial n p) = let support = 0 :| [1..n] in
 >   ((\k -> (k, binomialPMF n p k)) <$> support)
-> runProb (Certainly a) = (a, 1.0) :| []
-> runProb (Bind probA f) =
->   let (x :| xs) = joinedPartly probA f in vectFromList xs (\xs' -> concatNonempty (x :> xs'))
-> runProb (CustomDist (d :> ds)) = d :| toList ds
+> shape (CustomDist (d :> ds)) = d :| toList ds
 
-> joinedPartly :: Prob a -> (a -> Prob b) -> NE.NonEmpty (NE.NonEmpty (b, Double))
-> joinedPartly probA f = let pfAs = probfAs probA f in ((\(dist,p) -> second (p *) <$> dist) <$> pfAs)
-
-> probfAs :: Prob b -> (b -> Prob a) -> NE.NonEmpty (NE.NonEmpty (a, Double), Double)
-> probfAs probA f = let xs = runProb probA in (\(x,p) -> (runProb (f x), p)) <$> xs
+> flatten :: NE.NonEmpty (NE.NonEmpty (a, Double), Double) -> NE.NonEmpty (a, Double)
+> flatten shapeOfShapes = do
+>   (shape, p) <- shapeOfShapes
+>   (value, q) <- shape
+>   pure (value, p*q)
 
 binomialPMF n p is the probability mass function of the binomial distribution
 B(n, p), where n is the number of trials and p is the probability of success for
@@ -152,19 +141,6 @@ of n trials.
 
 > binomialPMF :: Nat -> Double -> Nat -> Double
 > binomialPMF n p k = fromIntegral (n `choose` k) * (p ^^ k) * ((1.0 - p) ^^ (n - k))
-
-> concatNonempty' :: Vect n [a] -> [a]
-> concatNonempty' Nil = []
-> concatNonempty' (x1:>xs) = let xs' = concatNonempty' xs in
->   x1 ++ xs'
-
-> concatNonempty :: Vect (TNat.S n) (NE.NonEmpty a) -> NE.NonEmpty a
-> concatNonempty (x :> Nil) = x
-> -- concatNonempty [x1, x2] = (_ ** (snd x1) ++ (snd x2))
-> concatNonempty (x1:>xs) =
->   let xs' = concatNonempty' (NE.toList <$> xs)
->       (x1head :| x1s) = x1
->   in x1head :| (x1s ++ xs')
 
 A vector type that keeps its size in its type.
 
@@ -249,12 +225,15 @@ Generates a (pseudo)-random float between 0 and 1.
 >   pure a
 
 > sample :: RandomGen g => Prob a -> RandomProcess g a
-> sample (Bind prob f) = do
->   observedFromProb <- sample prob
->   sample (f observedFromProb)
-> sample prob = do
+> sample (Free dist) = do
+>   prob <- sampleDist dist
+>   sample prob
+> sample (Pure value) = pure value
+
+> sampleDist :: RandomGen g => Distribution a -> RandomProcess g a
+> sampleDist prob = do
 >   probability <- rndDouble
->   let dist = runProb prob
+>   let dist = shape prob
 >   pure (withNonEmptyVect dist (\dist -> inverseCMF probability dist 0.0))
 
 > normalize :: Vect n (a, Nat) -> Vect n (a, Double)
