@@ -39,7 +39,7 @@ reasonable amount of time on my machine.
 
 >     dist :: Prob (Nat, Nat)
 >     dist = simulate 1 1 5
->     distMoreSteps = simulate 25 25 250
+>     distMoreSteps = simulate 25 25 50000
 >   -- print dist -- WARNING: Spams terminal
 >   print (gatherer (NE.toList (runProb dist)))
 >   putStrLn ""
@@ -54,31 +54,33 @@ section "Forward Simulations" at
 https://esajournals.onlinelibrary.wiley.com/doi/10.1890/0012-9623-93.4.373.
 
 > simulate :: Nat -> Nat -> Nat -> Prob (Nat, Nat)
-> simulate species1Initial species2Initial 0 = pure (species1Initial, species2Initial)
-> simulate species1Initial species2Initial k = gather $ do
->   (n1, n2) <- step species1Initial species2Initial
->   gather $ simulate n1 n2 (k - 1)
+> simulate species1Initial species2Initial k = simulate' species1Initial species2Initial k species1Initial
+
+> simulate' :: Nat -> Nat -> Nat -> Nat -> Prob (Nat, Nat)
+> simulate' species1Initial species2Initial 0 _ = pure (species1Initial, species2Initial)
+> simulate' species1 species2 k species1Initial = gather $ do
+>   (n1, n2) <- step species1 species2 species1Initial
+>   gather $ simulate' n1 n2 (k - 1) species1Initial
 
 The step function corresponds to the "For each year" part of the pseudo-code in
 the article. It uses some smaller functions to implement the instructions in the
 pseudo-code. These functions are based on the probability monad defined below.
 
-> step :: Nat -> Nat -> Prob (Nat, Nat)
-> step n1 n2 = gather $ do
+> step :: Nat -> Nat -> Nat -> Prob (Nat, Nat)
+> step n1 n2 initialN1 = gather $ do
 >   dead1 <- kill n1 mortalityRate
 >   dead2 <- kill n2 mortalityRate
->   gather $ (\(new1,new2) -> ((n1 - dead1) + new1, (n2 - dead2) + new2)) <$> replace dead1 dead2
+>   gather $ (\(new1,new2) -> ((n1 - dead1) + new1, (n2 - dead2) + new2)) <$> replace dead1 dead2 n1 (n1 + n2)
 
 > kill :: Nat -> Double -> Prob Nat
 > kill = binomial
 
-> replace :: Nat -> Nat -> Prob (Nat, Nat)
-> replace 0 0 = pure (0, 0) -- avoid division by zero
-> replace n1 n2 = gather $ replace' <$> binomial (n1 + n2) (fromIntegral n1 / fromIntegral (n1 + n2)) where
+> replace :: Nat -> Nat -> Nat -> Nat -> Prob (Nat, Nat)
+> replace n1 n2 initialN1 total = gather $ replace' <$> binomial (n1 + n2) (fromIntegral initialN1 / fromIntegral total) where
 >   replace' n1' = (n1', (n1 + n2) - n1')
 
 > mortalityRate :: Double
-> mortalityRate = 0.03
+> mortalityRate = 0.2
 
 I originally wrote this program in Idris, where I made use of its Nat type.
 That's why I alias Natural as Nat.
@@ -254,7 +256,7 @@ from a probability distribution.
 > runSampled prob 0 = pure []
 > runSampled prob size = do
 >   observeds <- runSampled prob (size - 1)
->   observed <- sample prob
+>   observed <- sample prob  -- QUESTION: Parallelize?
 >   pure (observed : observeds)
 
 RandomProcess is just an alias for the State monad that I use so that I don't
