@@ -22,6 +22,7 @@ Imports.
 > import Control.Monad.Free
 > import Data.Functor.Classes
 > import Data.Bifunctor (first, second)
+> import Data.List
 
 > main :: IO ()
 > main = do
@@ -39,9 +40,7 @@ reasonable amount of time on my machine.
 >     dist :: Prob (Nat, Nat)
 >     dist = simulate 1 1 5
 >     distMoreSteps = simulate 25 25 250
->   putStrLn "dist"
->   print dist
->   putStrLn ""
+>   -- print dist -- WARNING: Spams terminal
 >   print (gatherer (NE.toList (runProb dist)))
 >   putStrLn ""
 >   gen <- getStdGen
@@ -74,6 +73,7 @@ pseudo-code. These functions are based on the probability monad defined below.
 > kill = binomial
 
 > replace :: Nat -> Nat -> Prob (Nat, Nat)
+> replace 0 0 = pure (0, 0) -- avoid division by zero
 > replace n1 n2 = gather $ replace' <$> binomial (n1 + n2) (fromIntegral n1 / fromIntegral (n1 + n2)) where
 >   replace' n1' = (n1', (n1 + n2) - n1')
 
@@ -96,19 +96,19 @@ probability distrubution and compute a result.
 > type Prob a = Free Distribution a
 
 > data Distribution :: * -> * where
->   Binomial :: Nat -> Double -> Distribution Nat
+>   BinomialShape :: Nat -> Double -> (Nat -> a) -> Distribution a
 >   CustomDist :: Vect (TNat.S n) (a, Double) -> Distribution a
 
 > instance Functor Distribution where
->   fmap f (Binomial n p) = let support = 0 :| [1..n] in
->     withNonEmptyVect ((\k -> (f k, binomialPMF n p k)) <$> support) CustomDist
+>   fmap f (BinomialShape n p g) = BinomialShape n p (f . g)
 >   fmap f (CustomDist d) = CustomDist (first f <$> d)
 
 > binomial :: Nat -> Double -> Prob Nat
-> binomial n p = Free (Pure <$> Binomial n p)
+> binomial n p = Free (BinomialShape n p Pure)
 
 > instance Show1 Distribution where
->   liftShowsPrec _ _ _ (Binomial n p) = (++) ("(Binomial " ++ show n ++ " " ++ show p ++ ")")
+>   liftShowsPrec argShowsPrec _ _ (BinomialShape n p f) = (++) ("(BinomialShape " ++ show n ++ " " ++ show p ++ " <support: " ++ intercalate ", " ((showArg . f) <$> [0..n]) ++ ">)") where
+>     showArg a = argShowsPrec 0 a ""
 >   liftShowsPrec argShowsPrec _ _ (CustomDist d) = (++) ("(CustomDist " ++ showVect (argShowsPrec 0) d ++ ")") where
 >     showVect :: (a -> String -> String) -> Vect n (a, Double) -> String
 >     showVect _ Nil = "Nil"
@@ -124,8 +124,8 @@ all but the smallest distributions.
 > runProb (Pure value) = (value, 1.0) :| []
 
 > shape :: Distribution a -> NE.NonEmpty (a, Double)
-> shape (Binomial n p) = let support = 0 :| [1..n] in
->   ((\k -> (k, binomialPMF n p k)) <$> support)
+> shape (BinomialShape n p f) = let support = 0 :| [1..n] in
+>   ((\k -> (f k, binomialPMF n p k)) <$> support)
 > shape (CustomDist (d :> ds)) = d :| toList ds
 
 > flatten :: NE.NonEmpty (NE.NonEmpty (a, Double), Double) -> NE.NonEmpty (a, Double)
