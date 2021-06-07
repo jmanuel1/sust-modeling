@@ -36,9 +36,11 @@ Population of second species: 1
 I chose these parameters so that runProb dist can finish in a somewhat
 reasonable amount of time on my machine.
 
+>     mortalityRate :: Double
+>     mortalityRate = 0.2
 >     dist :: Prob (Nat, Nat)
->     dist = simulate 1 1 5
->     distMoreSteps = simulate 25 25 5000
+>     dist = simulate 1 1 mortalityRate 5
+>     distMoreSteps = simulate 25 25 mortalityRate 5000
 >   -- print dist -- WARNING: Spams terminal
 >   print (gatherer (NE.toList (runProb dist)))
 >   putStrLn ""
@@ -52,21 +54,21 @@ The simulate function is the translation of the model described under the
 section "Forward Simulations" at
 https://esajournals.onlinelibrary.wiley.com/doi/10.1890/0012-9623-93.4.373.
 
-> simulate :: Nat -> Nat -> Nat -> Prob (Nat, Nat)
-> simulate species1Initial species2Initial k = simulate' species1Initial species2Initial k species1Initial
+> simulate :: Nat -> Nat -> Double -> Nat -> Prob (Nat, Nat)
+> simulate species1Initial species2Initial mortalityRate k = simulate' species1Initial species2Initial mortalityRate k species1Initial
 
-> simulate' :: Nat -> Nat -> Nat -> Nat -> Prob (Nat, Nat)
-> simulate' species1Initial species2Initial 0 _ = pure (species1Initial, species2Initial)
-> simulate' species1 species2 k species1Initial = gather $ do
->   (n1, n2) <- step species1 species2 species1Initial
->   gather $ simulate' n1 n2 (k - 1) species1Initial
+> simulate' :: Nat -> Nat -> Double -> Nat -> Nat -> Prob (Nat, Nat)
+> simulate' species1Initial species2Initial _ 0 _ = pure (species1Initial, species2Initial)
+> simulate' species1 species2 mortalityRate k species1Initial = gather $ do
+>   (n1, n2) <- step species1 species2 mortalityRate species1Initial
+>   gather $ simulate' n1 n2 mortalityRate (k - 1) species1Initial
 
 The step function corresponds to the "For each year" part of the pseudo-code in
 the article. It uses some smaller functions to implement the instructions in the
 pseudo-code. These functions are based on the probability monad defined below.
 
-> step :: Nat -> Nat -> Nat -> Prob (Nat, Nat)
-> step n1 n2 initialN1 = gather $ do
+> step :: Nat -> Nat -> Double -> Nat -> Prob (Nat, Nat)
+> step n1 n2 mortalityRate initialN1 = gather $ do
 >   dead1 <- kill n1 mortalityRate
 >   dead2 <- kill n2 mortalityRate
 >   gather $ (\(new1,new2) -> ((n1 - dead1) + new1, (n2 - dead2) + new2)) <$> replace dead1 dead2 n1 (n1 + n2)
@@ -77,12 +79,9 @@ pseudo-code. These functions are based on the probability monad defined below.
 > replace :: Nat -> Nat -> Nat -> Nat -> Prob (Nat, Nat)
 > replace n1 n2 initialN1 total = gather $ replace' <$> binomial (n1 + n2) (fromIntegral initialN1 / fromIntegral total) where
 >   replace' n1' = (n1', (n1 + n2) - n1')
->
+
 > binomial :: Nat -> Double -> Prob Nat
 > binomial = Binomial
->
-> mortalityRate :: Double
-> mortalityRate = 0.2
 
 I originally wrote this program in Idris, where I made use of its Nat type.
 That's why I alias Natural as Nat.
