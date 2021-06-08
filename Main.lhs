@@ -242,11 +242,7 @@ third argument is an accumulator that should be set to 0.0 by other functions.
 Generates a (pseudo)-random float between 0 and 1.
 
 > rndDouble :: RandomGen g => RandomProcess g Double
-> rndDouble = do
->   gen <- get
->   let (a, gen') = random gen
->   put gen'
->   pure a
+> rndDouble = state random
 
 > sample :: RandomGen g => Prob a -> RandomProcess g a
 > sample (Bind prob f) = do
