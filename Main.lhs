@@ -6,6 +6,7 @@ Language extensions.
 > {-# LANGUAGE UndecidableInstances #-}
 > {-# LANGUAGE ScopedTypeVariables #-}
 > {-# LANGUAGE RankNTypes #-}
+> {-# LANGUAGE FlexibleContexts #-}
 
 Imports.
 
@@ -20,6 +21,7 @@ Imports.
 > import qualified Data.List.NonEmpty as NE
 > import Data.List.NonEmpty (NonEmpty(..))
 > import Control.Monad.Free
+> import Control.Monad.Free.Church
 > import Data.Functor.Classes
 > import Data.Bifunctor (first, second)
 > import Data.List
@@ -56,9 +58,9 @@ section "Forward Simulations" at
 https://esajournals.onlinelibrary.wiley.com/doi/10.1890/0012-9623-93.4.373.
 
 > simulate :: Nat -> Nat -> Double -> Nat -> Prob (Nat, Nat)
-> simulate species1Initial species2Initial mortalityRate k = simulate' species1Initial species2Initial mortalityRate k species1Initial
+> simulate species1Initial species2Initial mortalityRate k = improve (simulate' species1Initial species2Initial mortalityRate k species1Initial)
 
-> simulate' :: Nat -> Nat -> Double -> Nat -> Nat -> Prob (Nat, Nat)
+> simulate' :: MonadFree Distribution m => Nat -> Nat -> Double -> Nat -> Nat -> m (Nat, Nat)
 > simulate' species1Initial species2Initial _ 0 _ = pure (species1Initial, species2Initial)
 > simulate' species1 species2 mortalityRate k species1Initial = gather $ do
 >   (n1, n2) <- step species1 species2 mortalityRate species1Initial
@@ -68,16 +70,16 @@ The step function corresponds to the "For each year" part of the pseudo-code in
 the article. It uses some smaller functions to implement the instructions in the
 pseudo-code. These functions are based on the probability monad defined below.
 
-> step :: Nat -> Nat -> Double -> Nat -> Prob (Nat, Nat)
+> step :: MonadFree Distribution m => Nat -> Nat -> Double -> Nat -> m (Nat, Nat)
 > step n1 n2 mortalityRate initialN1 = gather $ do
 >   dead1 <- kill n1 mortalityRate
 >   dead2 <- kill n2 mortalityRate
 >   gather $ (\(new1,new2) -> ((n1 - dead1) + new1, (n2 - dead2) + new2)) <$> replace dead1 dead2 n1 (n1 + n2)
 
-> kill :: Nat -> Double -> Prob Nat
+> kill :: MonadFree Distribution m => Nat -> Double -> m Nat
 > kill = binomial
 
-> replace :: Nat -> Nat -> Nat -> Nat -> Prob (Nat, Nat)
+> replace :: MonadFree Distribution m => Nat -> Nat -> Nat -> Nat -> m (Nat, Nat)
 > replace n1 n2 initialN1 total = gather $ replace' <$> binomial (n1 + n2) (fromIntegral initialN1 / fromIntegral total) where
 >   replace' n1' = (n1', (n1 + n2) - n1')
 
@@ -104,8 +106,8 @@ probability distrubution and compute a result.
 >   fmap f (BinomialShape n p g) = BinomialShape n p (f . g)
 >   fmap f (CustomDist d) = CustomDist (first f <$> d)
 
-> binomial :: Nat -> Double -> Prob Nat
-> binomial n p = Free (BinomialShape n p Pure)
+> binomial :: MonadFree Distribution m => Nat -> Double -> m Nat
+> binomial n p = liftF (BinomialShape n p id)
 
 > instance Show1 Distribution where
 >   liftShowsPrec argShowsPrec _ _ (BinomialShape n p f) = (++) ("(BinomialShape " ++ show n ++ " " ++ show p ++ " <support: " ++ intercalate ", " ((showArg . f) <$> [0..n]) ++ ">)") where
@@ -176,7 +178,7 @@ A vector type that keeps its size in its type.
 >   foldMap f Nil = mempty
 >   foldMap f (x :> xs) = f x <> foldMap f xs
 
-> gather :: (Eq a) => Prob a -> Prob a
+> gather :: (Eq a, MonadFree Distribution m) => m a -> m a
 > -- FIXME: Adapt this function for vects
 > -- gather (CustomDist d) = CustomDist (gatherer d)
 > -- gather (Bind pa f) = pa >>= (\a => gather $ f a) -- FIXME: Might not gather completely because pa not gathered
