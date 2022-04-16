@@ -1,4 +1,19 @@
 
+# Created by https://www.toptal.com/developers/gitignore/api/idris
+# Edit at https://www.toptal.com/developers/gitignore?templates=idris
+
+### Idris ###
+# Idris 2
+*.ttc
+*.ttm
+
+# Idris 1
+*.ibc
+*.o
+
+# End of https://www.toptal.com/developers/gitignore/api/idris
+
+
 # Created by https://www.toptal.com/developers/gitignore/api/haskell
 # Edit at https://www.toptal.com/developers/gitignore?templates=haskell
 

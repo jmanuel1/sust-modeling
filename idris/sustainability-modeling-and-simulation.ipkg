@@ -1,3 +1,0 @@
-package "jmanuel1/sustainability-modeling-and-simulation"
-
-pkgs = "legacy/probability", "effects"
