@@ -1,0 +1,26 @@
+#+TITLE: Adaptive capacity model
+
+The code was built using version ~0.5.1-f93e1c4ea~ (that is, commit ~f93e1c4ea~)
+of the [[https://github.com/idris-lang/Idris2][Idris 2]] compiler. It might work
+on the official 0.5.1 version and the latest version from the ~main~ branch, but
+that has not been tested.
+
+To load the adaptive capacity model into the REPL, first clone this repositiory,
+then run
+
+#+BEGIN_SRC bash
+$PATH_TO_IDRIS_2 AdaptiveCapacity.idr --find-ipkg
+#+END_SRC
+
+in the directory you cloned the repository into. (~$PATH_TO_IDRIS_2~ is whatever
+path the compiler can be found at on your system.)
+
+To load the example of model instance based on
+[[https://www.sciencedirect.com/science/article/pii/S095937800400010X?casa_token=lAgRsi4FpwkAAAAA:t8yHOFod2fm_dtOKzmnADdfMMR3UkZNNmAU7J749J8JiOTb2OfPK8FjSAcMYdeP0zseqk5ltnPw#BIB25][O'Brien et al. (2004)]] into the REPL, run
+
+#+BEGIN_SRC bash
+$PATH_TO_IDRIS_2 OBrienEtAl.idr --find-ipkg
+#+END_SRC
+
+I suggest installing ~[[https://github.com/hanslub42/rlwrap][rlwrap]]~ and
+prefixing the above commands with that so that the REPL experience is bearable.
