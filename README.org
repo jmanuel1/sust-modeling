@@ -15,12 +15,12 @@ $PATH_TO_IDRIS_2 AdaptiveCapacity.idr --find-ipkg
 in the directory you cloned the repository into. (~$PATH_TO_IDRIS_2~ is whatever
 path the compiler can be found at on your system.)
 
-To load the example of model instance based on
+To load the example model instance based on
 [[https://www.sciencedirect.com/science/article/pii/S095937800400010X?casa_token=lAgRsi4FpwkAAAAA:t8yHOFod2fm_dtOKzmnADdfMMR3UkZNNmAU7J749J8JiOTb2OfPK8FjSAcMYdeP0zseqk5ltnPw#BIB25][O'Brien et al. (2004)]] into the REPL, run
 
 #+BEGIN_SRC bash
 $PATH_TO_IDRIS_2 OBrienEtAl.idr --find-ipkg
 #+END_SRC
 
-I suggest installing ~[[https://github.com/hanslub42/rlwrap][rlwrap]]~ and
+I suggest installing [[https://github.com/hanslub42/rlwrap][~rlwrap~]] and
 prefixing the above commands with that so that the REPL experience is bearable.
