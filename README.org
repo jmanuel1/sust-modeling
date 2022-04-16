@@ -22,5 +22,5 @@ To load the example model instance based on
 $PATH_TO_IDRIS_2 OBrienEtAl.idr --find-ipkg
 #+END_SRC
 
-I suggest installing [[https://github.com/hanslub42/rlwrap][~rlwrap~]] and
+I suggest installing [[https://github.com/hanslub42/rlwrap][rlwrap]] and
 prefixing the above commands with that so that the REPL experience is bearable.
