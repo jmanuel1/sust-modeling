@@ -11,6 +11,7 @@ data UntimestampedAction =
   | UsePesticides
   | Fertilize
   | AdjustToOpenEconomy
+  | PerformNonAgriculturalActivity
 
 data Action : Nat -> Type where
   Act : UntimestampedAction -> Action _
